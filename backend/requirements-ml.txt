@@ -1,0 +1,9 @@
+# ML Dependencies (install separately if needed)
+# Using flexible versions for compatibility
+tensorflow
+sentence-transformers
+transformers
+torch
+scikit-learn
+joblib
+numpy<2.0.0
