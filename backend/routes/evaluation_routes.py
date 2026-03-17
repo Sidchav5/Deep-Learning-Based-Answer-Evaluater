@@ -43,9 +43,16 @@ db = client[Config.DATABASE_NAME]
 def evaluate(payload):
     """Batch evaluation endpoint with RAG support"""
     try:
+        if payload.get('role') != 'teacher':
+            return jsonify({
+                'message': 'Students are not allowed to upload question/model documents. Use student submission workflow.'
+            }), 403
+
         # Check if ML models are loaded
         if not ml_models.is_loaded:
-            return jsonify({'message': 'ML models not loaded. Please wait or contact administrator.'}), 503
+            ml_models.ensure_loaded(force_reload=True)
+
+        model_mode = 'ml' if ml_models.is_loaded else 'fallback'
         
         # Get upload mode
         upload_mode = request.form.get('uploadMode', 'file')
@@ -119,12 +126,20 @@ def evaluate(payload):
         
         # Perform batch evaluation
         try:
-            results = evaluation_service.evaluate_batch(
-                questions=questions,
-                model_answers=model_answers,
-                student_answers=student_answers,
-                use_rag=use_rag
-            )
+            if model_mode == 'ml':
+                results = evaluation_service.evaluate_batch(
+                    questions=questions,
+                    model_answers=model_answers,
+                    student_answers=student_answers,
+                    use_rag=use_rag
+                )
+            else:
+                results = evaluation_service.evaluate_batch_fallback(
+                    questions=questions,
+                    model_answers=model_answers,
+                    student_answers=student_answers,
+                    use_rag=False
+                )
         except Exception as e:
             print(f"Evaluation error: {e}")
             import traceback
@@ -151,7 +166,8 @@ def evaluate(payload):
         
         # Build response
         response = {
-            'message': 'Evaluation completed successfully',
+            'message': 'Evaluation completed successfully' if model_mode == 'ml' else 'Evaluation completed using fallback mode (ML unavailable)',
+            'evaluationMode': model_mode,
             **results
         }
         

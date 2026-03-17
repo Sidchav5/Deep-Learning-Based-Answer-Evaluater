@@ -92,6 +92,10 @@ function Navbar() {
                   <p className="dropdown-user-email">{user.email}</p>
                 </div>
                 <div className="dropdown-divider"></div>
+                <button className="dropdown-item" onClick={() => navigate('/evaluate')}>
+                  <i className="fa-solid fa-table-columns"></i>
+                  Dashboard
+                </button>
                 <button className="dropdown-item">
                   <i className="fa-solid fa-user"></i>
                   Profile

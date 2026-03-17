@@ -4,6 +4,7 @@ Evaluation Service
 Handles answer evaluation using ML models and RAG
 """
 import numpy as np
+import re
 from typing import Dict, List
 
 from config import Config
@@ -13,6 +14,30 @@ from services.rag_service import rag_service
 
 class EvaluationService:
     """Service for evaluating student answers"""
+
+    @staticmethod
+    def _tokenize(text: str) -> set:
+        """Tokenize text for fallback lexical similarity"""
+        if not text or not isinstance(text, str):
+            return set()
+        return set(re.findall(r'\b[a-zA-Z0-9]{2,}\b', text.lower()))
+
+    @staticmethod
+    def _fallback_similarity(reference: str, student: str) -> float:
+        """Compute a simple lexical overlap similarity for fallback mode"""
+        reference_tokens = EvaluationService._tokenize(reference)
+        student_tokens = EvaluationService._tokenize(student)
+
+        if not reference_tokens or not student_tokens:
+            return 0.0
+
+        intersection = len(reference_tokens.intersection(student_tokens))
+        union = len(reference_tokens.union(student_tokens))
+
+        if union == 0:
+            return 0.0
+
+        return float(intersection / union)
     
     @staticmethod
     def evaluate_answer(
@@ -189,6 +214,137 @@ class EvaluationService:
             nli_note = ""
         
         return f"{quality} {sim_note} {nli_note}"
+
+    @staticmethod
+    def evaluate_answer_fallback(
+        question: str,
+        reference: str,
+        student: str,
+        marks: float,
+        use_rag: bool = False
+    ) -> Dict:
+        """
+        Evaluate a single answer using fallback lexical scoring when ML models are unavailable
+        """
+        if not student or not isinstance(student, str):
+            return {
+                'finalScore': 0,
+                'maxMarks': float(marks),
+                'similarity': 0.0,
+                'nliLabel': 'EMPTY_ANSWER',
+                'nliConfidence': 0.0,
+                'feedback': 'No answer provided. Please submit a response to receive marks.',
+                'ragEnabled': False,
+                'contextUsed': 0
+            }
+
+        if len(student.strip()) < 10:
+            return {
+                'finalScore': 0,
+                'maxMarks': float(marks),
+                'similarity': 0.0,
+                'nliLabel': 'INSUFFICIENT_LENGTH',
+                'nliConfidence': 0.0,
+                'feedback': 'Answer is too short. Please provide a more complete response with sufficient detail.',
+                'ragEnabled': False,
+                'contextUsed': 0
+            }
+
+        similarity = EvaluationService._fallback_similarity(reference, student)
+
+        if similarity >= 0.75:
+            nli_label = 'ENTAILMENT'
+        elif similarity >= 0.4:
+            nli_label = 'NEUTRAL'
+        else:
+            nli_label = 'LOW_SIMILARITY'
+
+        final_score = max(0.0, min(similarity * float(marks), float(marks)))
+        final_score = round(final_score)
+
+        feedback = EvaluationService._generate_basic_feedback(
+            similarity=similarity,
+            nli_label=nli_label,
+            score=final_score,
+            max_marks=marks
+        )
+
+        feedback += ' (Fallback scoring mode used: lexical overlap.)'
+
+        return {
+            'finalScore': int(final_score),
+            'maxMarks': float(marks),
+            'similarity': float(round(similarity, 4)),
+            'nliLabel': nli_label,
+            'nliConfidence': 0.0,
+            'feedback': feedback,
+            'ragEnabled': False,
+            'contextUsed': 0
+        }
+
+    @staticmethod
+    def evaluate_batch_fallback(
+        questions: List[Dict],
+        model_answers: List[Dict],
+        student_answers: List[Dict],
+        use_rag: bool = False
+    ) -> Dict:
+        """Evaluate multiple Q&A pairs using fallback mode"""
+        model_dict = {a['number']: a['answer'] for a in model_answers}
+        student_dict = {a['number']: a['answer'] for a in student_answers}
+
+        results_list = []
+        total_score = 0
+        total_max_marks = 0
+        total_similarity = 0
+
+        for q in questions:
+            q_num = q['number']
+            model_ans = model_dict.get(q_num, '')
+            student_ans = student_dict.get(q_num, '')
+
+            if not model_ans or not student_ans:
+                continue
+
+            eval_result = EvaluationService.evaluate_answer_fallback(
+                question=q['question'],
+                reference=model_ans,
+                student=student_ans,
+                marks=q['marks'],
+                use_rag=use_rag
+            )
+
+            question_result = {
+                'questionNumber': q_num,
+                'question': q['question'],
+                'modelAnswer': model_ans,
+                'studentAnswer': student_ans,
+                'score': float(eval_result['finalScore']),
+                'maxMarks': float(eval_result['maxMarks']),
+                'similarity': float(eval_result['similarity']),
+                'nliLabel': eval_result['nliLabel'].lower().replace('_', ' '),
+                'feedback': eval_result['feedback'],
+                'ragEnabled': eval_result.get('ragEnabled', False),
+                'contextUsed': eval_result.get('contextUsed', 0)
+            }
+
+            results_list.append(question_result)
+            total_score += eval_result['finalScore']
+            total_max_marks += eval_result['maxMarks']
+            total_similarity += eval_result['similarity']
+
+        total_questions = len(results_list)
+        percentage = (total_score / total_max_marks * 100) if total_max_marks > 0 else 0
+        average_similarity = total_similarity / total_questions if total_questions > 0 else 0
+
+        return {
+            'totalScore': float(round(total_score, 2)),
+            'totalMaxMarks': float(total_max_marks),
+            'percentage': float(round(percentage, 2)),
+            'totalQuestions': int(total_questions),
+            'averageSimilarity': float(round(average_similarity, 4)),
+            'questions': results_list
+        }
     
     @staticmethod
     def evaluate_batch(

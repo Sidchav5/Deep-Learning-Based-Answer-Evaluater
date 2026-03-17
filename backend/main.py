@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config, config
-from routes import auth_bp, eval_bp
+from routes import auth_bp, eval_bp, workflow_bp
 from models import ml_models
 
 
@@ -44,6 +44,7 @@ def create_app(config_name='development'):
     # Register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(eval_bp)
+    app.register_blueprint(workflow_bp)
     
     # Root endpoint
     @app.route('/')

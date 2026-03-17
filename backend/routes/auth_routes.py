@@ -4,6 +4,7 @@ Authentication API routes
 """
 from flask import Blueprint, request, jsonify
 from pymongo import MongoClient
+from bson import ObjectId
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
@@ -17,6 +18,26 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/api')
 client = MongoClient(Config.MONGO_URI)
 db = client[Config.DATABASE_NAME]
 users_collection = db['users']
+
+
+def normalize_subjects(subjects_data):
+    """Normalize subject input into a clean list of strings"""
+    if subjects_data is None:
+        return []
+
+    if isinstance(subjects_data, str):
+        subjects = [subjects_data]
+    elif isinstance(subjects_data, list):
+        subjects = subjects_data
+    else:
+        return []
+
+    normalized = []
+    for subject in subjects:
+        if isinstance(subject, str) and subject.strip():
+            normalized.append(subject.strip())
+
+    return sorted(list(set(normalized)))
 
 
 @auth_bp.route('/signup', methods=['POST'])
@@ -34,10 +55,14 @@ def signup():
         email = data.get('email')
         password = data.get('password')
         role = data.get('role')
+        subjects = normalize_subjects(data.get('subjects'))
         
         # Validate role
         if role not in ['teacher', 'student']:
             return jsonify({'message': 'Invalid role. Must be "teacher" or "student"'}), 400
+
+        if role == 'teacher' and not subjects:
+            return jsonify({'message': 'Teacher must have at least one subject'}), 400
         
         # Check if user already exists
         if users_collection.find_one({'email': email}):
@@ -52,6 +77,7 @@ def signup():
             'email': email,
             'password': hashed_password,
             'role': role,
+            'subjects': subjects,
             'created_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
         }
@@ -70,7 +96,8 @@ def signup():
                 'id': user_id,
                 'name': name,
                 'email': email,
-                'role': role
+                'role': role,
+                'subjects': subjects
             }
         }), 201
         
@@ -112,7 +139,8 @@ def login():
                 'id': user_id,
                 'name': user['name'],
                 'email': user['email'],
-                'role': user['role']
+                'role': user['role'],
+                'subjects': user.get('subjects', [])
             }
         }), 200
         
@@ -140,12 +168,21 @@ def verify():
     payload = verify_token(token)
     if not payload:
         return jsonify({'message': 'Invalid or expired token'}), 401
+
+    try:
+        user = users_collection.find_one({'_id': ObjectId(payload['user_id'])})
+    except Exception:
+        return jsonify({'message': 'Invalid token payload'}), 401
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
     
     return jsonify({
         'message': 'Token is valid',
         'user': {
             'id': payload['user_id'],
+            'name': user.get('name', ''),
             'email': payload['email'],
-            'role': payload['role']
+            'role': payload['role'],
+            'subjects': user.get('subjects', [])
         }
     }), 200

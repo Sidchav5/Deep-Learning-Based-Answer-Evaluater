@@ -8,6 +8,7 @@ import Footer from './components/Footer';
 import SignUp from './components/SignUp';
 import Login from './components/Login';
 import EvaluationPage from './components/EvaluationPage';
+import WorkflowPage from './components/WorkflowPage';
 
 // Home Page Component
 function HomePage() {
@@ -27,7 +28,8 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/evaluate" element={<EvaluationPage />} />
+        <Route path="/evaluate" element={<WorkflowPage />} />
+        <Route path="/legacy-evaluate" element={<EvaluationPage />} />
       </Routes>
     </Router>
   );

@@ -10,7 +10,8 @@ function SignUp() {
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'student'
+    role: 'student',
+    subjects: ''
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,7 +28,6 @@ function SignUp() {
     e.preventDefault();
     setError('');
 
-    // Validation
     if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
       setError('All fields are required');
       return;
@@ -43,6 +43,16 @@ function SignUp() {
       return;
     }
 
+    if (formData.role === 'teacher' && !formData.subjects.trim()) {
+      setError('Please add at least one subject for teacher account');
+      return;
+    }
+
+    const subjectList = formData.subjects
+      .split(',')
+      .map((subject) => subject.trim())
+      .filter((subject) => subject.length > 0);
+
     setLoading(true);
 
     try {
@@ -55,7 +65,8 @@ function SignUp() {
           name: formData.name,
           email: formData.email,
           password: formData.password,
-          role: formData.role
+          role: formData.role,
+          subjects: subjectList
         }),
       });
 
@@ -67,9 +78,9 @@ function SignUp() {
       } else {
         setError(data.message || 'Registration failed');
       }
-    } catch (error) {
+    } catch (requestError) {
       setError('Network error. Please try again.');
-      console.error('Signup error:', error);
+      console.error('Signup error:', requestError);
     } finally {
       setLoading(false);
     }
@@ -139,6 +150,22 @@ function SignUp() {
               <option value="student">Student</option>
               <option value="teacher">Teacher</option>
             </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="subjects">
+              <i className="fa-solid fa-book"></i>
+              Subjects {formData.role === 'teacher' ? '(required)' : '(optional)'}
+            </label>
+            <input
+              type="text"
+              id="subjects"
+              name="subjects"
+              value={formData.subjects}
+              onChange={handleChange}
+              placeholder="Example: Mathematics, Physics"
+              disabled={loading}
+            />
           </div>
 
           <div className="form-group">
