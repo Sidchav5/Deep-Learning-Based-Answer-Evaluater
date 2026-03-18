@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../Auth.css';
+import Navbar from './Navbar';
 
 function Login() {
   const navigate = useNavigate();

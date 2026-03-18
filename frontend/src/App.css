@@ -25,7 +25,7 @@ html {
   --gradient-hero: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 50%, rgba(51, 65, 85, 0.95) 100%);
   --text-light: #F1F5F9;
   --text-dark: #0F172A;
-  --text-muted: #94A3B8;
+  --text-muted: #7b8289;
   --card-bg: #1E293B;
   --card-bg-lighter: #334155;
   --bg-dark: #0F172A;
@@ -76,6 +76,7 @@ body {
     background-position: 100% 50%;
   }
 }
+
 
 /* Animated gradient overlay */
 .hero-section::before {

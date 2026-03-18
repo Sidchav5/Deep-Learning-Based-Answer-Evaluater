@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../WorkflowPage.css';
+import Navbar from './Navbar';
 
 const API_BASE = 'http://localhost:5000/api';
 
@@ -829,6 +830,7 @@ function WorkflowPage() {
 
   return (
     <div className="workflow-page">
+      <Navbar />
       <div className="workflow-header">
         <h1>{user.role === 'teacher' ? 'Teacher Assignment Dashboard' : 'Student Assignment Dashboard'}</h1>
         <p>Welcome, {user.name} ({user.role})</p>

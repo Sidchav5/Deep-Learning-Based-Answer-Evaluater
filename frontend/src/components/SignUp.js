@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../Auth.css';
-
+import Navbar from './Navbar';
 function SignUp() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -88,6 +88,7 @@ function SignUp() {
 
   return (
     <div className="auth-container">
+      
       <div className="auth-card">
         <div className="auth-header">
           <i className="fa-solid fa-graduation-cap"></i>

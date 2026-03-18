@@ -14,7 +14,7 @@ function HeroSection() {
           </h1>
           <div className="poster-info">
             <p>
-              <strong>Intelligent Grading Through Deep Learning</strong>
+              <strong className="Sid">Intelligent Grading Through Deep Learning</strong>
             </p>
             <p>
               Save hours of grading time while providing <strong>fair and consistent evaluations</strong>. 
