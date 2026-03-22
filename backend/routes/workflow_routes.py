@@ -9,8 +9,7 @@ from flask import Blueprint, jsonify, request
 from pymongo import MongoClient
 
 from config import Config
-from models import ml_models
-from services import evaluation_service, rag_service
+from services import evaluation_service, llama_service
 from utils.auth import token_required
 from utils.file_processing import allowed_file, extract_text_from_file
 from utils.parsers import parse_answers, parse_questions
@@ -421,10 +420,8 @@ def evaluate_submission(payload, submission_id):
         if not role_guard(payload, 'teacher'):
             return jsonify({'message': 'Only teachers can evaluate submissions'}), 403
 
-        if not ml_models.is_loaded:
-            ml_models.ensure_loaded(force_reload=True)
-
-        model_mode = 'ml' if ml_models.is_loaded else 'fallback'
+        if not llama_service.is_available():
+            return jsonify({'message': 'Llama API is not configured or unavailable'}), 503
 
         submission_object_id = parse_object_id(submission_id)
         if not submission_object_id:
@@ -477,33 +474,11 @@ def evaluate_submission(payload, submission_id):
         if not questions or not model_answers or not student_answers:
             return jsonify({'message': 'Invalid question/answer formatting for evaluation'}), 400
 
-        use_rag = request.form.get('useRAG', 'true').lower() == 'true'
-        rag_enabled_for_eval = use_rag and bool(study_material_text)
-
-        if rag_enabled_for_eval:
-            rag_service.ingest_document(
-                study_material_text,
-                metadata={
-                    'assignment_id': str(assignment['_id']),
-                    'teacher_id': payload['user_id'],
-                    'timestamp': datetime.utcnow()
-                }
-            )
-
-        if model_mode == 'ml':
-            results = evaluation_service.evaluate_batch(
-                questions=questions,
-                model_answers=model_answers,
-                student_answers=student_answers,
-                use_rag=rag_enabled_for_eval
-            )
-        else:
-            results = evaluation_service.evaluate_batch_fallback(
-                questions=questions,
-                model_answers=model_answers,
-                student_answers=student_answers,
-                use_rag=False
-            )
+        results = evaluation_service.evaluate_batch(
+            questions=questions,
+            model_answers=model_answers,
+            student_answers=student_answers
+        )
 
         results = convert_numpy_types(results)
 
@@ -513,7 +488,7 @@ def evaluate_submission(payload, submission_id):
             'teacher_id': payload['user_id'],
             'student_id': submission.get('student_id'),
             'results': results,
-            'evaluation_mode': model_mode,
+            'evaluation_mode': 'llama',
             'released': False,
             'evaluated_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
@@ -537,9 +512,9 @@ def evaluate_submission(payload, submission_id):
         )
 
         return jsonify({
-            'message': 'Submission evaluated successfully' if model_mode == 'ml' else 'Submission evaluated using fallback mode (ML unavailable)',
+            'message': 'Submission evaluated successfully',
             'submissionId': submission_id,
-            'evaluationMode': model_mode,
+            'evaluationMode': 'llama',
             **results
         }), 200
     except Exception as e:

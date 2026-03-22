@@ -20,17 +20,21 @@ function WorkflowPage() {
     dueDate: '',
     questionsFile: null,
     modelAnswersFile: null,
-    studyMaterialFile: null
+    studyMaterialFile: null,
+    inputMode: 'file'
   });
-  const [teacherAssignments, setTeacherAssignments] = useState([]);
-  const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
+  const [, setTeacherAssignments] = useState([]);
+  const [selectedAssignmentId] = useState('');
   const [teacherSubmissions, setTeacherSubmissions] = useState([]);
   const [teacherOverrides, setTeacherOverrides] = useState({
-    useRAG: true,
     questionsFile: null,
     modelAnswersFile: null,
     studentAnswersFile: null,
-    studyMaterialFile: null
+    studyMaterialFile: null,
+    inputMode: 'file',
+    questionsText: '',
+    studentAnswersText: '',
+    marksValue: 5
   });
 
   const [studentSubject, setStudentSubject] = useState('');
@@ -55,6 +59,19 @@ function WorkflowPage() {
     } catch (e) {
       return value;
     }
+  };
+
+  const normalizeAnswerText = (value) => {
+    if (typeof value !== 'string') {
+      return 'N/A';
+    }
+
+    const cleaned = value
+      .replace(/^A\d+\s*:\s*/i, '')
+      .replace(/\\n/g, '\n')
+      .trim();
+
+    return cleaned || 'N/A';
   };
 
   const resetMessages = () => {
@@ -142,7 +159,7 @@ function WorkflowPage() {
     }
 
     setUser(JSON.parse(userData));
-  }, [navigate]);
+  }, [getToken, navigate]);
 
   useEffect(() => {
     if (!user) {
@@ -180,73 +197,32 @@ function WorkflowPage() {
     loadStudentSubmissions
   ]);
 
-  const handleTeacherCreateAssignment = async (e) => {
-    e.preventDefault();
-    resetMessages();
-
-    if (!teacherForm.subject || !teacherForm.questionsFile || !teacherForm.modelAnswersFile) {
-      setError('Subject, Questions file, and Model Answers file are required');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const formData = new FormData();
-      formData.append('title', teacherForm.title);
-      formData.append('subject', teacherForm.subject);
-      if (teacherForm.dueDate) {
-        formData.append('dueDate', teacherForm.dueDate);
-      }
-      formData.append('questionsFile', teacherForm.questionsFile);
-      formData.append('modelAnswersFile', teacherForm.modelAnswersFile);
-      if (teacherForm.studyMaterialFile) {
-        formData.append('studyMaterialFile', teacherForm.studyMaterialFile);
-      }
-
-      const response = await fetch(`${API_BASE}/teacher/assignments`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: formData
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to create assignment');
-      }
-
-      setSuccess('Assignment created successfully');
-      setTeacherForm((prev) => ({
-        ...prev,
-        title: '',
-        dueDate: '',
-        questionsFile: null,
-        modelAnswersFile: null,
-        studyMaterialFile: null
-      }));
-      await loadTeacherAssignments();
-    } catch (e) {
-      setError(e.message || 'Assignment creation failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleTeacherEvaluateSubmission = async (submissionId) => {
     resetMessages();
     try {
       setLoading(true);
 
       const formData = new FormData();
-      formData.append('useRAG', String(teacherOverrides.useRAG));
-      if (teacherOverrides.questionsFile) {
-        formData.append('questionsFile', teacherOverrides.questionsFile);
+
+      // Handle input mode
+      if (teacherOverrides.inputMode === 'text') {
+        formData.append('uploadMode', 'text');
+        formData.append('questionsText', teacherOverrides.questionsText);
+        formData.append('modelAnswersText', teacherOverrides.modelAnswersText);
+        formData.append('studentAnswersText', teacherOverrides.studentAnswersText);
+      } else {
+        formData.append('uploadMode', 'file');
+        if (teacherOverrides.questionsFile) {
+          formData.append('questionsFile', teacherOverrides.questionsFile);
+        }
+        if (teacherOverrides.modelAnswersFile) {
+          formData.append('modelAnswersFile', teacherOverrides.modelAnswersFile);
+        }
+        if (teacherOverrides.studentAnswersFile) {
+          formData.append('studentAnswersFile', teacherOverrides.studentAnswersFile);
+        }
       }
-      if (teacherOverrides.modelAnswersFile) {
-        formData.append('modelAnswersFile', teacherOverrides.modelAnswersFile);
-      }
-      if (teacherOverrides.studentAnswersFile) {
-        formData.append('studentAnswersFile', teacherOverrides.studentAnswersFile);
-      }
+
       if (teacherOverrides.studyMaterialFile) {
         formData.append('studyMaterialFile', teacherOverrides.studyMaterialFile);
       }
@@ -842,108 +818,241 @@ function WorkflowPage() {
       {user.role === 'teacher' && (
         <>
           <section className="workflow-section">
-            <h2>Create Assignment</h2>
-            <form className="workflow-form" onSubmit={handleTeacherCreateAssignment}>
-              <input
-                type="text"
-                placeholder="Assignment title (optional)"
-                value={teacherForm.title}
-                onChange={(e) => setTeacherForm((prev) => ({ ...prev, title: e.target.value }))}
-              />
+            <h2>⚡ Direct Evaluation (Llama Pipeline)</h2>
+            <form className="workflow-form" onSubmit={async (e) => {
+              e.preventDefault();
+              resetMessages();
 
-              <select
-                value={teacherForm.subject}
-                onChange={(e) => setTeacherForm((prev) => ({ ...prev, subject: e.target.value }))}
-              >
-                <option value="">Select subject</option>
-                {subjects.map((subject) => (
-                  <option key={subject} value={subject}>{subject}</option>
-                ))}
-              </select>
+              if (!teacherOverrides.questionsText || !teacherOverrides.studentAnswersText || !teacherOverrides.marksValue) {
+                setError('Please fill in Question, Marks, and Student Answer fields');
+                return;
+              }
 
-              <input
-                type="datetime-local"
-                value={teacherForm.dueDate}
-                onChange={(e) => setTeacherForm((prev) => ({ ...prev, dueDate: e.target.value }))}
-              />
+              try {
+                setLoading(true);
+                
+                // Step 1: Generate model answer from Colab via Llama
+                setSuccess('Generating model answer from Llama...');
+                const generatePayload = {
+                  question: teacherOverrides.questionsText,
+                  marks: teacherOverrides.marksValue
+                };
 
-              <label>
-                Question Doc
-                <input type="file" onChange={(e) => setTeacherForm((prev) => ({ ...prev, questionsFile: e.target.files[0] || null }))} />
-              </label>
-              <label>
-                Model Answer Doc
-                <input type="file" onChange={(e) => setTeacherForm((prev) => ({ ...prev, modelAnswersFile: e.target.files[0] || null }))} />
-              </label>
-              <label>
-                RAG Material Doc (optional)
-                <input type="file" onChange={(e) => setTeacherForm((prev) => ({ ...prev, studyMaterialFile: e.target.files[0] || null }))} />
-              </label>
+                const generateResponse = await fetch(`${API_BASE}/generate-answer`, {
+                  method: 'POST',
+                  headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify(generatePayload)
+                });
 
-              <button type="submit" disabled={loading}>Create Assignment</button>
+                const generateData = await generateResponse.json();
+                if (!generateResponse.ok) {
+                  throw new Error(generateData.message || 'Failed to generate model answer');
+                }
+
+                const modelAnswer = generateData.answer || generateData.reference_answer || '';
+                if (!modelAnswer) {
+                  throw new Error('No model answer generated from Llama');
+                }
+
+                setSuccess('Model answer generated. Now evaluating student answer...');
+
+                // Step 2: Evaluate student answer against generated model answer
+                const formData = new FormData();
+                formData.append('uploadMode', 'text');
+                
+                // Format question with marks: "Q1: [marks] question text"
+                const formattedQuestion = `Q1: [${teacherOverrides.marksValue} marks] ${teacherOverrides.questionsText}`;
+                formData.append('questionsText', formattedQuestion);
+                
+                // Format model answer: "A1: answer text"
+                const formattedModelAnswer = `A1: ${modelAnswer}`;
+                formData.append('modelAnswersText', formattedModelAnswer);
+                
+                // Format student answer: "A1: answer text"
+                const formattedStudentAnswer = `A1: ${teacherOverrides.studentAnswersText}`;
+                formData.append('studentAnswersText', formattedStudentAnswer);
+
+                const response = await fetch(`${API_BASE}/evaluate`, {
+                  method: 'POST',
+                  headers: getAuthHeaders(),
+                  body: formData
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                  throw new Error(data.message || 'Evaluation failed');
+                }
+
+                setSuccess('✅ Evaluation completed! Results below.');
+                // Store results for display (backend returns top-level result fields)
+                const resultPayload = data.results || data;
+                setStudentResult({
+                  ...resultPayload,
+                  assignment: { title: 'Direct Evaluation', subject: 'N/A' },
+                  generatedModelAnswer: modelAnswer
+                });
+              } catch (e) {
+                setError(e.message || 'Evaluation failed');
+              } finally {
+                setLoading(false);
+              }
+            }}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Question</label>
+                <textarea
+                  rows="3"
+                  placeholder="What is machine learning? Explain with examples."
+                  value={teacherOverrides.questionsText}
+                  onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, questionsText: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Marks</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={teacherOverrides.marksValue}
+                    onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, marksValue: parseInt(e.target.value) || 5 }))}
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Student Answer</label>
+                <textarea
+                  rows="4"
+                  placeholder="Student's answer here..."
+                  value={teacherOverrides.studentAnswersText}
+                  onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studentAnswersText: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <button type="submit" disabled={loading} style={{ marginTop: '1rem' }}>Evaluate with Llama</button>
             </form>
           </section>
 
-          <section className="workflow-section">
-            <h2>My Assignments</h2>
-            <div className="workflow-list">
-              {teacherAssignments.length === 0 && <p>No assignments yet.</p>}
-              {teacherAssignments.map((assignment) => (
-                <div key={assignment.id} className="workflow-card">
-                  <div>
-                    <h3>{assignment.title}</h3>
-                    <p>{assignment.subject} | Submissions: {assignment.submissionCount}</p>
-                    <p className="muted">Due: {formatDateTime(assignment.dueDate)}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setSelectedAssignmentId(assignment.id);
-                      try {
-                        setLoading(true);
-                        await loadTeacherSubmissions(assignment.id);
-                      } catch (e) {
-                        setError(e.message || 'Failed to load submissions');
-                      } finally {
-                        setLoading(false);
-                      }
-                    }}
-                  >
-                    View Submissions
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {selectedAssignmentId && (
+          {studentResult && (
             <section className="workflow-section">
-              <h2>Submissions for Selected Assignment</h2>
+              <h2>📊 Evaluation Results</h2>
+              <div className="workflow-card" style={{ marginBottom: '1.5rem' }}>
+                <div>
+                  <p><strong>Marks Awarded:</strong> {studentResult.totalScore} / {studentResult.totalMaxMarks}</p>
+                  <p><strong>Percentage:</strong> {studentResult.percentage}%</p>
+                  
+                  <hr style={{ margin: '1rem 0', borderColor: 'rgba(255,255,255,0.1)' }} />
+                  
+                  <p><strong>🤖 Model Answer (Generated by Llama):</strong></p>
+                  <div className="result-answer-box result-answer-model">
+                    <div className="result-answer-content">{normalizeAnswerText(studentResult.generatedModelAnswer || studentResult.questions?.[0]?.referenceAnswer)}</div>
+                  </div>
+                  
+                  <hr style={{ margin: '1rem 0', borderColor: 'rgba(255,255,255,0.1)' }} />
+                  
+                  <p><strong>📝 Student Answer:</strong></p>
+                  <div className="result-answer-box result-answer-student">
+                    <div className="result-answer-content">{normalizeAnswerText(studentResult.questions?.[0]?.studentAnswer)}</div>
+                  </div>
+                  
+                  <hr style={{ margin: '1rem 0', borderColor: 'rgba(255,255,255,0.1)' }} />
+                  
+                  <p><strong>Semantic Similarity:</strong> {((studentResult.questions?.[0]?.similarity || 0) * 100).toFixed(1)}%</p>
+                  <p><strong>Grade:</strong> {studentResult.questions?.[0]?.grade || 'N/A'}</p>
+                </div>
+                <button type="button" onClick={handleDownloadStudentReport} style={{ marginTop: '1rem' }}>📥 Download Report</button>
+              </div>
+            </section>
+          )}
 
-              <div className="workflow-form inline-form">
+          <section className="workflow-section" style={{ display: 'none' }}>
+            <h2>Submissions for Selected Assignment</h2>
+
+            <div className="workflow-form inline-form">
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Input Mode</label>
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        name="inputMode"
+                        value="file"
+                        checked={teacherOverrides.inputMode === 'file'}
+                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, inputMode: e.target.value }))}
+                      />
+                      Upload Files
+                    </label>
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        name="inputMode"
+                        value="text"
+                        checked={teacherOverrides.inputMode === 'text'}
+                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, inputMode: e.target.value }))}
+                      />
+                      Enter Text
+                    </label>
+                  </div>
+                </div>
+
+                {teacherOverrides.inputMode === 'file' ? (
+                  <>
+                    <label>
+                      Override Questions (optional)
+                      <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, questionsFile: e.target.files[0] || null }))} />
+                    </label>
+                    <label>
+                      Override Model Answers (optional)
+                      <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, modelAnswersFile: e.target.files[0] || null }))} />
+                    </label>
+                    <label>
+                      Override Student Answers (optional)
+                      <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studentAnswersFile: e.target.files[0] || null }))} />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      Questions (Format: Q1: [5 marks] Question text)
+                      <textarea
+                        rows="4"
+                        placeholder="Q1: [5 marks] What is machine learning?&#10;Q2: [3 marks] Define neural networks?"
+                        value={teacherOverrides.questionsText}
+                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, questionsText: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Model Answers (Format: A1: Answer text)
+                      <textarea
+                        rows="4"
+                        placeholder="A1: Machine learning is a subset of AI...&#10;A2: Neural networks are computing systems..."
+                        value={teacherOverrides.modelAnswersText}
+                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, modelAnswersText: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Student Answers (Format: A1: Answer text)
+                      <textarea
+                        rows="4"
+                        placeholder="A1: Student's answer...&#10;A2: Student's answer..."
+                        value={teacherOverrides.studentAnswersText}
+                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studentAnswersText: e.target.value }))}
+                      />
+                    </label>
+                  </>
+                )}
+
                 <label>
-                  Override Questions (optional)
-                  <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, questionsFile: e.target.files[0] || null }))} />
-                </label>
-                <label>
-                  Override Model Answers (optional)
-                  <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, modelAnswersFile: e.target.files[0] || null }))} />
-                </label>
-                <label>
-                  Override Student Answers (optional)
-                  <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studentAnswersFile: e.target.files[0] || null }))} />
-                </label>
-                <label>
-                  Override RAG Material (optional)
+                  Override Study Material (optional)
                   <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studyMaterialFile: e.target.files[0] || null }))} />
-                </label>
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={teacherOverrides.useRAG}
-                    onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, useRAG: e.target.checked }))}
-                  />
-                  Use RAG in evaluation
                 </label>
               </div>
 
