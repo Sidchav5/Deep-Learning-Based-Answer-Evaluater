@@ -10,7 +10,7 @@ function ServicesSection() {
       id: 1,
       icon: 'fa-solid fa-robot',
       title: 'AI Answer Evaluation',
-      description: 'Intelligent grading using deep learning models with semantic understanding, NLI reasoning, and custom ANN for accurate scoring.',
+      description: 'Intelligent grading powered by your external Colab evaluation pipeline with semantic and keyword-aware scoring.',
       link: '/evaluate',
       status: 'active',
       color: '#667eea'
@@ -18,8 +18,8 @@ function ServicesSection() {
     {
       id: 2,
       icon: 'fa-solid fa-brain',
-      title: 'AI Answer using RAG',
-      description: 'Generate context-aware reference answers using Retrieval-Augmented Generation from your knowledge base documents.',
+      title: 'AI Answer Generation',
+      description: 'Generate context-aware reference answers using your connected Llama pipeline.',
       link: '#rag-answer',
       status: 'coming-soon',
       color: '#10b981'
@@ -99,7 +99,7 @@ function ServicesSection() {
         <div className="services-info">
           <i className="fa-solid fa-info-circle"></i>
           <p>
-            Start with AI Answer Evaluation now. RAG-based answer generation and OCR extraction features are coming soon to enhance your grading workflow.
+            Start with AI Answer Evaluation now. OCR extraction is coming soon to enhance your grading workflow.
           </p>
         </div>
 

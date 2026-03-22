@@ -720,6 +720,32 @@ body {
   display: inline-block;
 }
 
+.result-answer-box {
+  background: var(--bg-input);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  margin-top: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.result-answer-model {
+  border-left: 4px solid var(--accent-purple-light);
+}
+
+.result-answer-student {
+  border-left: 4px solid var(--accent-blue-light);
+}
+
+.result-answer-content {
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
 /* Loading State */
 .workflow-page.loading {
   opacity: 0.7;
@@ -955,3 +981,50 @@ body {
 .workflow-card:nth-child(6) { animation-delay: 0.6s; }
 .workflow-card:nth-child(7) { animation-delay: 0.7s; }
 .workflow-card:nth-child(8) { animation-delay: 0.8s; }
+
+/* Radio Label Styles */
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-primary);
+  user-select: none;
+}
+
+.radio-label input[type="radio"] {
+  cursor: pointer;
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent-purple);
+}
+
+.radio-label:hover {
+  color: var(--accent-purple-light);
+}
+
+/* Textarea Styles */
+textarea {
+  width: 100%;
+  padding: var(--spacing-md);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  font-family: 'Courier New', monospace;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  resize: vertical;
+  transition: all var(--transition-base);
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+}
+
+textarea::placeholder {
+  color: var(--text-muted);
+}

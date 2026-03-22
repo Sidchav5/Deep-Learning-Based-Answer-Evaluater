@@ -1,5 +1,5 @@
 // src/components/EvaluationPage.js
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../EvaluationPage.css';
 
@@ -9,8 +9,6 @@ function EvaluationPage() {
     questionsFile: null,
     modelAnswersFile: null,
     studentAnswersFile: null,
-    studyMaterialFile: null,
-    useRAG: false,
     questionsText: '',
     modelAnswersText: '',
     studentAnswersText: ''
@@ -87,13 +85,6 @@ function EvaluationPage() {
     });
   };
 
-  const handleCheckbox = (e) => {
-    setFormData({
-      ...formData,
-      useRAG: e.target.checked
-    });
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -111,10 +102,6 @@ function EvaluationPage() {
     if (uploadMode === 'file') {
       if (!formData.questionsFile || !formData.modelAnswersFile || !formData.studentAnswersFile) {
         setError('Please upload Questions, Model Answers, and Student Answers files');
-        return;
-      }
-      if (formData.useRAG && !formData.studyMaterialFile) {
-        setError('Please upload study material for RAG comparison');
         return;
       }
     } else {
@@ -186,8 +173,6 @@ function EvaluationPage() {
       questionsFile: null,
       modelAnswersFile: null,
       studentAnswersFile: null,
-      studyMaterialFile: null,
-      useRAG: false,
       questionsText: '',
       modelAnswersText: '',
       studentAnswersText: ''
@@ -734,43 +719,6 @@ function EvaluationPage() {
                 />
               </div>
 
-              {/* RAG Toggle */}
-              <div className="rag-toggle-section">
-                <label className="rag-toggle glass-effect">
-                  <input
-                    type="checkbox"
-                    checked={formData.useRAG}
-                    onChange={handleCheckbox}
-                    disabled={loading}
-                  />
-                  <span className="toggle-slider"></span>
-                  <div className="toggle-content">
-                    <i className="fa-solid fa-brain"></i>
-                    <div>
-                      <strong>Enable RAG Enhancement</strong>
-                      <small>Compare answers with additional study material</small>
-                    </div>
-                  </div>
-                </label>
-              </div>
-
-              {/* Study Material (Conditional) */}
-              {formData.useRAG && (
-                <FileUploadSection
-                  title="Study Material"
-                  icon="fa-solid fa-book"
-                  fieldName="studyMaterialFile"
-                  formData={formData}
-                  dragActive={dragActive}
-                  uploadProgress={uploadProgress}
-                  onFileChange={handleFileChange}
-                  onDrag={handleDrag}
-                  onDrop={handleDrop}
-                  onRemove={removeFile}
-                  disabled={loading}
-                  hint="Upload reference material for better evaluation"
-                />
-              )}
             </>
           ) : (
             <>

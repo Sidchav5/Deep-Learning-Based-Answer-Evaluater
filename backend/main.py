@@ -1,7 +1,7 @@
-# backend/app.py - Refactored Flask Application with RAG
+# backend/main.py - Refactored Flask Application
 """
 Main Flask application entry point
-Clean, modular architecture with RAG support using Groq API
+Clean, modular architecture using external Llama pipeline
 """
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config, config
 from routes import auth_bp, eval_bp, workflow_bp
-from models import ml_models
+from services import llama_service
 
 
 def create_app(config_name='development'):
@@ -56,9 +56,8 @@ def create_app(config_name='development'):
             'features': {
                 'authentication': True,
                 'batch_evaluation': True,
-                'rag': Config.RAG_ENABLED,
-                'groq_powered': bool(Config.GROQ_API_KEY),
-                'ml_models_loaded': ml_models.is_loaded
+                'llama_pipeline': llama_service.is_available(),
+                'local_models_loaded': False
             }
         })
     
@@ -79,7 +78,7 @@ def create_app(config_name='development'):
 
 
 def initialize_services():
-    """Initialize application services and ML models"""
+    """Initialize application services"""
     print("\n" + "="*60)
     print("🚀 Starting AI Answer Evaluation System")
     print("="*60 + "\n")
@@ -87,16 +86,9 @@ def initialize_services():
     # Check configuration
     print("📋 Configuration:")
     print(f"   - Environment: {'Development' if Config.DEBUG else 'Production'}")
-    print(f"   - RAG Enabled: {Config.RAG_ENABLED}")
-    print(f"   - Groq API Key: {'✅ Configured' if Config.GROQ_API_KEY else '❌ Not configured'}")
-    print(f"   - Model Directory: {Config.MODEL_DIR}")
+    print(f"   - Llama API URL: {'✅ Configured' if llama_service.is_available() else '❌ Not configured'}")
     print()
-    
-    # Load ML models (already loaded via ml_models singleton)
-    if ml_models.is_loaded:
-        print("✅ ML Models initialization complete\n")
-    else:
-        print("⚠️  ML Models failed to load. Evaluation endpoints will not work.\n")
+    print("✅ Local model loading disabled (using external Llama pipeline).\n")
     
     print("="*60)
     print("🎉 Application ready!")

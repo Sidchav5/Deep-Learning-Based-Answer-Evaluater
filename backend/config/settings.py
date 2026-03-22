@@ -26,40 +26,15 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
     ALLOWED_EXTENSIONS = {'txt', 'pdf', 'doc', 'docx'}
     
-    # ML Models Configuration
-    MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'Model')
-    ANN_MODEL_PATH = os.path.join(MODEL_DIR, 'ann_semantic_grader.h5')
-    SCALER_PATH = os.path.join(MODEL_DIR, 'feature_scaler.pkl')
-    FEATURES_PATH = os.path.join(MODEL_DIR, 'model_features.pkl')
-    
-    # SBERT Configuration
-    SBERT_MODEL_NAME = 'all-MiniLM-L6-v2'
-    
-    # NLI Configuration
-    NLI_MODEL_NAME = 'roberta-large-mnli'
-    
-    # Groq API Configuration
-    GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
-    GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')
-    GROQ_MAX_TOKENS = int(os.getenv('GROQ_MAX_TOKENS', 1024))
-    GROQ_TEMPERATURE = float(os.getenv('GROQ_TEMPERATURE', 0.3))
-    
-    # RAG Configuration
-    RAG_ENABLED = os.getenv('RAG_ENABLED', 'True').lower() == 'true'
-    RAG_CHUNK_SIZE = int(os.getenv('RAG_CHUNK_SIZE', 500))
-    RAG_CHUNK_OVERLAP = int(os.getenv('RAG_CHUNK_OVERLAP', 50))
-    RAG_TOP_K = int(os.getenv('RAG_TOP_K', 3))
-    RAG_SIMILARITY_THRESHOLD = float(os.getenv('RAG_SIMILARITY_THRESHOLD', 0.3))
-    
-    # Vector Store Configuration
-    VECTOR_STORE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'vector_store')
+    # External Llama Pipeline API Configuration
+    LLAMA_API_BASE_URL = os.getenv('LLAMA_API_BASE_URL', os.getenv('KAGGLE_NGROK_URL', ''))
+    LLAMA_TIMEOUT_SECONDS = int(os.getenv('LLAMA_TIMEOUT_SECONDS', 120))
     
     @staticmethod
     def init_app(app):
         """Initialize application with configuration"""
         # Create necessary directories
         os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
-        os.makedirs(Config.VECTOR_STORE_PATH, exist_ok=True)
 
 # Development configuration
 class DevelopmentConfig(Config):

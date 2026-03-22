@@ -1,21 +1,26 @@
 # Backend README
 
-## Flask Authentication API
+## Flask API (Llama Pipeline Mode)
 
 ### Setup Instructions
 
 1. **Install Python dependencies:**
 
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   ```
+  ```bash
+  cd backend
+  pip install -r requirements.txt
+  ```
 
-2. **Run the Flask server:**
-   ```bash
-   python app.py
-   ```
-   Server will start on `http://localhost:5000`
+2. **Configure environment:**
+
+  - Copy `.env.example` to `.env`
+  - Set `LLAMA_API_BASE_URL` to your active Colab/Kaggle endpoint
+
+3. **Run the Flask server:**
+  ```bash
+  python main.py
+  ```
+  Server will start on `http://localhost:5000`
 
 ### API Endpoints
 
@@ -84,3 +89,8 @@
 - JWT token authentication
 - CORS enabled for frontend communication
 - Token expiration (24 hours default)
+
+### Notes
+
+- Backend evaluation now uses only the external Llama API pipeline.
+- Legacy local-model stack (BERT/SBERT/NLI/ANN) has been removed from runtime paths.
