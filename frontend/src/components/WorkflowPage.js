@@ -1,46 +1,39 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import '../WorkflowPage.css';
 import Navbar from './Navbar';
+import Toast from './Toast';
 
 const API_BASE = 'http://localhost:5000/api';
 
+const emptyQuestion = () => ({ id: `${Date.now()}-${Math.random()}`, question: '', marks: 5 });
+
 function WorkflowPage() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [user, setUser] = useState(null);
   const [subjects, setSubjects] = useState([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState({ message: '', type: 'info' });
 
   const [teacherForm, setTeacherForm] = useState({
     title: '',
     subject: '',
     dueDate: '',
-    questionsFile: null,
-    modelAnswersFile: null,
-    studyMaterialFile: null,
-    inputMode: 'file'
+    questions: [emptyQuestion()]
   });
-  const [, setTeacherAssignments] = useState([]);
-  const [selectedAssignmentId] = useState('');
+  const [teacherAssignments, setTeacherAssignments] = useState([]);
+  const [selectedTeacherAssignment, setSelectedTeacherAssignment] = useState(null);
   const [teacherSubmissions, setTeacherSubmissions] = useState([]);
-  const [teacherOverrides, setTeacherOverrides] = useState({
-    questionsFile: null,
-    modelAnswersFile: null,
-    studentAnswersFile: null,
-    studyMaterialFile: null,
-    inputMode: 'file',
-    questionsText: '',
-    studentAnswersText: '',
-    marksValue: 5
-  });
+  const [teacherSubmissionDetail, setTeacherSubmissionDetail] = useState(null);
 
   const [studentSubject, setStudentSubject] = useState('');
   const [studentAssignments, setStudentAssignments] = useState([]);
-  const [studentAssignmentId, setStudentAssignmentId] = useState('');
-  const [studentAnswersFile, setStudentAnswersFile] = useState(null);
+  const [selectedStudentAssignment, setSelectedStudentAssignment] = useState(null);
+  const [studentAnswers, setStudentAnswers] = useState({});
   const [studentSubmissions, setStudentSubmissions] = useState([]);
   const [studentResult, setStudentResult] = useState(null);
 
@@ -50,10 +43,17 @@ function WorkflowPage() {
     Authorization: `Bearer ${getToken()}`
   }), [getToken]);
 
+  const resetMessages = () => {
+    setError('');
+    setSuccess('');
+  };
+
+  const showToast = (message, type = 'info') => {
+    setToast({ message, type });
+  };
+
   const formatDateTime = (value) => {
-    if (!value) {
-      return '-';
-    }
+    if (!value) return '-';
     try {
       return new Date(value).toLocaleString();
     } catch (e) {
@@ -61,23 +61,28 @@ function WorkflowPage() {
     }
   };
 
-  const normalizeAnswerText = (value) => {
-    if (typeof value !== 'string') {
-      return 'N/A';
-    }
+  const routeParts = useMemo(() => (
+    location.pathname.replace(/^\/evaluate\/?/, '').split('/').filter(Boolean)
+  ), [location.pathname]);
 
-    const cleaned = value
-      .replace(/^A\d+\s*:\s*/i, '')
-      .replace(/\\n/g, '\n')
-      .trim();
+  const rolePart = routeParts[0] || '';
+  const viewPart = routeParts[1] || '';
+  const idPart = routeParts[2] || '';
 
-    return cleaned || 'N/A';
-  };
+  const isTeacherHome = rolePart === 'teacher' && !viewPart;
+  const isTeacherCreate = rolePart === 'teacher' && viewPart === 'create';
+  const isTeacherAssignments = rolePart === 'teacher' && viewPart === 'assignments' && !idPart;
+  const isTeacherAssignmentDetail = rolePart === 'teacher' && viewPart === 'assignments' && Boolean(idPart);
 
-  const resetMessages = () => {
-    setError('');
-    setSuccess('');
-  };
+  const isStudentHome = rolePart === 'student' && !viewPart;
+  const isStudentAssignments = rolePart === 'student' && viewPart === 'assignments' && !idPart;
+  const isStudentAssignmentDetail = rolePart === 'student' && viewPart === 'assignments' && Boolean(idPart);
+  const isStudentSubmissions = rolePart === 'student' && viewPart === 'submissions';
+  const isStudentResultDetail = rolePart === 'student' && viewPart === 'results' && Boolean(idPart);
+
+  const currentTeacherAssignmentId = isTeacherAssignmentDetail ? idPart : '';
+  const currentStudentAssignmentId = isStudentAssignmentDetail ? idPart : '';
+  const currentStudentResultId = isStudentResultDetail ? idPart : '';
 
   const fetchSubjects = useCallback(async () => {
     const response = await fetch(`${API_BASE}/subjects`, {
@@ -89,16 +94,18 @@ function WorkflowPage() {
     }
 
     setSubjects(data.subjects || []);
+
     if (user?.role === 'student') {
       const userSubjects = data.userSubjects || [];
       if (userSubjects.length > 0) {
         setStudentSubject((current) => current || userSubjects[0]);
       }
     }
+
     if (user?.role === 'teacher' && !teacherForm.subject && (data.userSubjects || []).length > 0) {
       setTeacherForm((prev) => ({ ...prev, subject: data.userSubjects[0] }));
     }
-  }, [getAuthHeaders, user, teacherForm.subject]);
+  }, [getAuthHeaders, teacherForm.subject, user]);
 
   const loadTeacherAssignments = useCallback(async () => {
     const response = await fetch(`${API_BASE}/teacher/assignments`, {
@@ -111,20 +118,30 @@ function WorkflowPage() {
     setTeacherAssignments(data.assignments || []);
   }, [getAuthHeaders]);
 
-  const loadTeacherSubmissions = useCallback(async (assignmentId) => {
+  const loadTeacherAssignmentDetail = useCallback(async (assignmentId) => {
     if (!assignmentId) {
+      setSelectedTeacherAssignment(null);
       setTeacherSubmissions([]);
       return;
     }
 
-    const response = await fetch(`${API_BASE}/teacher/assignments/${assignmentId}/submissions`, {
-      headers: getAuthHeaders()
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.message || 'Failed to load submissions');
+    const [assignmentRes, submissionsRes] = await Promise.all([
+      fetch(`${API_BASE}/teacher/assignments/${assignmentId}`, { headers: getAuthHeaders() }),
+      fetch(`${API_BASE}/teacher/assignments/${assignmentId}/submissions`, { headers: getAuthHeaders() })
+    ]);
+
+    const assignmentData = await assignmentRes.json();
+    if (!assignmentRes.ok) {
+      throw new Error(assignmentData.message || 'Failed to load assignment details');
     }
-    setTeacherSubmissions(data.submissions || []);
+
+    const submissionsData = await submissionsRes.json();
+    if (!submissionsRes.ok) {
+      throw new Error(submissionsData.message || 'Failed to load submissions');
+    }
+
+    setSelectedTeacherAssignment(assignmentData.assignment || null);
+    setTeacherSubmissions(submissionsData.submissions || []);
   }, [getAuthHeaders]);
 
   const loadStudentAssignments = useCallback(async (subjectValue = '') => {
@@ -150,6 +167,48 @@ function WorkflowPage() {
     setStudentSubmissions(data.submissions || []);
   }, [getAuthHeaders]);
 
+  const loadStudentAssignmentDetail = useCallback(async (assignmentId) => {
+    if (!assignmentId) {
+      setSelectedStudentAssignment(null);
+      setStudentAnswers({});
+      return;
+    }
+
+    const response = await fetch(`${API_BASE}/student/assignments/${assignmentId}`, {
+      headers: getAuthHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to load assignment');
+    }
+
+    const assignment = data.assignment || null;
+    setSelectedStudentAssignment(assignment);
+
+    const defaultAnswers = {};
+    (assignment?.questions || []).forEach((question) => {
+      defaultAnswers[question.number] = '';
+    });
+    setStudentAnswers(defaultAnswers);
+  }, [getAuthHeaders]);
+
+  const loadStudentResult = useCallback(async (submissionId) => {
+    if (!submissionId) {
+      setStudentResult(null);
+      return;
+    }
+
+    const response = await fetch(`${API_BASE}/student/results/${submissionId}`, {
+      headers: getAuthHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Could not fetch result');
+    }
+
+    setStudentResult(data);
+  }, [getAuthHeaders]);
+
   useEffect(() => {
     const token = getToken();
     const userData = localStorage.getItem('user');
@@ -158,13 +217,25 @@ function WorkflowPage() {
       return;
     }
 
-    setUser(JSON.parse(userData));
+    try {
+      const parsedUser = JSON.parse(userData);
+      setUser(parsedUser);
+    } catch (e) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      navigate('/login');
+    }
   }, [getToken, navigate]);
 
   useEffect(() => {
-    if (!user) {
-      return;
+    if (!user) return;
+    if (location.pathname === '/evaluate') {
+      navigate(`/evaluate/${user.role}`, { replace: true });
     }
+  }, [location.pathname, navigate, user]);
+
+  useEffect(() => {
+    if (!user) return;
 
     const initialize = async () => {
       try {
@@ -173,12 +244,27 @@ function WorkflowPage() {
         await fetchSubjects();
 
         if (user.role === 'teacher') {
-          await loadTeacherAssignments();
+          if (isTeacherHome || isTeacherAssignments || isTeacherAssignmentDetail) {
+            await loadTeacherAssignments();
+          }
+          if (isTeacherAssignmentDetail && currentTeacherAssignmentId) {
+            await loadTeacherAssignmentDetail(currentTeacherAssignmentId);
+          }
         }
 
         if (user.role === 'student') {
-          await loadStudentAssignments(studentSubject);
-          await loadStudentSubmissions();
+          if (isStudentHome || isStudentAssignments || isStudentAssignmentDetail) {
+            await loadStudentAssignments(studentSubject);
+          }
+          if (isStudentAssignmentDetail && currentStudentAssignmentId) {
+            await loadStudentAssignmentDetail(currentStudentAssignmentId);
+          }
+          if (isStudentHome || isStudentSubmissions || isStudentResultDetail) {
+            await loadStudentSubmissions();
+          }
+          if (isStudentResultDetail && currentStudentResultId) {
+            await loadStudentResult(currentStudentResultId);
+          }
         }
       } catch (e) {
         setError(e.message || 'Failed to initialize dashboard');
@@ -189,62 +275,250 @@ function WorkflowPage() {
 
     initialize();
   }, [
-    user,
-    studentSubject,
+    currentStudentAssignmentId,
+    currentStudentResultId,
+    currentTeacherAssignmentId,
     fetchSubjects,
-    loadTeacherAssignments,
+    isStudentAssignmentDetail,
+    isStudentAssignments,
+    isStudentHome,
+    isStudentResultDetail,
+    isStudentSubmissions,
+    isTeacherAssignmentDetail,
+    isTeacherAssignments,
+    isTeacherHome,
+    loadStudentAssignmentDetail,
     loadStudentAssignments,
-    loadStudentSubmissions
+    loadStudentResult,
+    loadStudentSubmissions,
+    loadTeacherAssignmentDetail,
+    loadTeacherAssignments,
+    studentSubject,
+    user
   ]);
+
+  const addTeacherQuestion = () => {
+    setTeacherForm((prev) => ({
+      ...prev,
+      questions: [...prev.questions, emptyQuestion()]
+    }));
+  };
+
+  const removeTeacherQuestion = (id) => {
+    setTeacherForm((prev) => {
+      if (prev.questions.length === 1) return prev;
+      return {
+        ...prev,
+        questions: prev.questions.filter((question) => question.id !== id)
+      };
+    });
+  };
+
+  const updateTeacherQuestion = (id, field, value) => {
+    setTeacherForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((question) => (
+        question.id === id ? { ...question, [field]: value } : question
+      ))
+    }));
+  };
+
+  const handleCreateAssignment = async (e) => {
+    e.preventDefault();
+    resetMessages();
+
+    const cleanedQuestions = teacherForm.questions
+      .map((item) => ({
+        question: item.question.trim(),
+        marks: Number(item.marks)
+      }))
+      .filter((item) => item.question && item.marks > 0);
+
+    if (!teacherForm.subject) {
+      setError('Please select subject');
+      return;
+    }
+
+    if (cleanedQuestions.length === 0) {
+      setError('Add at least one valid question with marks');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const response = await fetch(`${API_BASE}/teacher/assignments`, {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: teacherForm.title,
+          subject: teacherForm.subject,
+          dueDate: teacherForm.dueDate,
+          questions: cleanedQuestions
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to create assignment');
+      }
+
+      setSuccess('Assignment created successfully');
+      showToast('✓ Assignment created', 'success');
+      setTeacherForm((prev) => ({
+        ...prev,
+        title: '',
+        dueDate: '',
+        questions: [emptyQuestion()]
+      }));
+
+      await loadTeacherAssignments();
+      navigate('/evaluate/teacher/assignments');
+    } catch (err) {
+      setError(err.message || 'Assignment creation failed');
+      showToast(`✕ ${err.message || 'Assignment creation failed'}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTeacherViewSubmission = async (submissionId) => {
+    resetMessages();
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_BASE}/teacher/submissions/${submissionId}`, {
+        headers: getAuthHeaders()
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to load submission details');
+      }
+
+      setTeacherSubmissionDetail(data.submission || null);
+      showToast('✓ Submission loaded', 'success');
+    } catch (err) {
+      setError(err.message || 'Failed to load submission details');
+      showToast(`✕ ${err.message || 'Failed to load submission details'}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleTeacherEvaluateSubmission = async (submissionId) => {
     resetMessages();
     try {
       setLoading(true);
-
-      const formData = new FormData();
-
-      // Handle input mode
-      if (teacherOverrides.inputMode === 'text') {
-        formData.append('uploadMode', 'text');
-        formData.append('questionsText', teacherOverrides.questionsText);
-        formData.append('modelAnswersText', teacherOverrides.modelAnswersText);
-        formData.append('studentAnswersText', teacherOverrides.studentAnswersText);
-      } else {
-        formData.append('uploadMode', 'file');
-        if (teacherOverrides.questionsFile) {
-          formData.append('questionsFile', teacherOverrides.questionsFile);
-        }
-        if (teacherOverrides.modelAnswersFile) {
-          formData.append('modelAnswersFile', teacherOverrides.modelAnswersFile);
-        }
-        if (teacherOverrides.studentAnswersFile) {
-          formData.append('studentAnswersFile', teacherOverrides.studentAnswersFile);
-        }
-      }
-
-      if (teacherOverrides.studyMaterialFile) {
-        formData.append('studyMaterialFile', teacherOverrides.studyMaterialFile);
-      }
+      showToast('✓ Evaluation started for this submission...', 'success');
 
       const response = await fetch(`${API_BASE}/teacher/submissions/${submissionId}/evaluate`, {
         method: 'POST',
-        headers: getAuthHeaders(),
-        body: formData
+        headers: getAuthHeaders()
       });
-
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.message || 'Evaluation failed');
       }
 
-      setSuccess('Submission evaluated successfully. Release it to make it visible to student.');
-      if (selectedAssignmentId) {
-        await loadTeacherSubmissions(selectedAssignmentId);
+      setTeacherSubmissions((prev) => prev.map((row) => (
+        row.id === submissionId
+          ? {
+              ...row,
+              status: row.status === 'released' ? 'released' : 'evaluated',
+              isEvaluated: true
+            }
+          : row
+      )));
+
+      setSuccess('Student assignment evaluated successfully');
+      showToast('✓ Submission evaluated successfully!', 'success');
+      if (currentTeacherAssignmentId) {
+        await loadTeacherAssignmentDetail(currentTeacherAssignmentId);
       }
-    } catch (e) {
-      setError(e.message || 'Evaluation failed');
+    } catch (err) {
+      const errorMsg = err.message || 'Evaluation failed';
+      setError(errorMsg);
+      showToast(`✕ ${errorMsg}`, 'error');
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTeacherEvaluateAll = async () => {
+    if (!currentTeacherAssignmentId) {
+      setError('Select an assignment first');
+      return;
+    }
+
+    resetMessages();
+    let progressInterval = null;
+    let timeoutHandler = null;
+
+    try {
+      setLoading(true);
+      showToast('📋 Preparing to evaluate all submissions...', 'progress');
+
+      timeoutHandler = setTimeout(() => {
+        setLoading(false);
+        showToast('✕ Evaluation timeout - please refresh and try again', 'error');
+      }, 15 * 60 * 1000);
+
+      let progressStep = 0;
+      progressInterval = setInterval(() => {
+        progressStep += 1;
+        const messages = [
+          '⏳ Querying submitted answers...',
+          '🤖 Initializing LLaMA evaluation...',
+          '⚙️ Processing question 1...',
+          '⚙️ Processing answers...',
+          '💾 Saving evaluation results...'
+        ];
+        const msg = messages[Math.min(progressStep, messages.length - 1)];
+        showToast(msg, 'progress');
+      }, 3000);
+
+      const response = await fetch(`${API_BASE}/teacher/assignments/${currentTeacherAssignmentId}/evaluate-all?force=true`, {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+
+      if (progressInterval) clearInterval(progressInterval);
+      if (timeoutHandler) clearTimeout(timeoutHandler);
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Evaluate all failed');
+      }
+
+      const failedCount = Number(data.failedCount || 0);
+      const evaluatedCount = Number(data.evaluatedCount || 0);
+      const skippedCount = Number(data.skippedCount || 0);
+
+      if (failedCount > 0) {
+        showToast(`✓ Completed! Evaluated: ${evaluatedCount}, Failed: ${failedCount}, Skipped: ${skippedCount}`, 'success');
+      } else if (evaluatedCount > 0) {
+        showToast(`✓ All ${evaluatedCount} submissions evaluated successfully!`, 'success');
+      } else if (skippedCount > 0) {
+        showToast(`✓ All ${skippedCount} submissions already evaluated`, 'success');
+      }
+
+      if (data.batchFallbackUsed) {
+        setTimeout(() => {
+          showToast('ℹ️ Used per-answer mode (batch endpoint unavailable)', 'info');
+        }, 500);
+      }
+
+      setSuccess(`Evaluation complete. Evaluated: ${evaluatedCount}, Failed: ${failedCount}, Skipped: ${skippedCount}`);
+      await loadTeacherAssignmentDetail(currentTeacherAssignmentId);
+    } catch (err) {
+      const errorMsg = err.message || 'Evaluate all failed';
+      setError(errorMsg);
+      showToast(`✕ ${errorMsg}`, 'error');
+    } finally {
+      if (progressInterval) clearInterval(progressInterval);
+      if (timeoutHandler) clearTimeout(timeoutHandler);
       setLoading(false);
     }
   };
@@ -253,7 +527,6 @@ function WorkflowPage() {
     resetMessages();
     try {
       setLoading(true);
-
       const response = await fetch(`${API_BASE}/teacher/submissions/${submissionId}/release`, {
         method: 'POST',
         headers: getAuthHeaders()
@@ -264,12 +537,14 @@ function WorkflowPage() {
         throw new Error(data.message || 'Release failed');
       }
 
-      setSuccess('Result released to student successfully');
-      if (selectedAssignmentId) {
-        await loadTeacherSubmissions(selectedAssignmentId);
+      setSuccess('Result released to student');
+      showToast('✓ Result released', 'success');
+      if (currentTeacherAssignmentId) {
+        await loadTeacherAssignmentDetail(currentTeacherAssignmentId);
       }
-    } catch (e) {
-      setError(e.message || 'Release failed');
+    } catch (err) {
+      setError(err.message || 'Release failed');
+      showToast(`✕ ${err.message || 'Release failed'}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -289,25 +564,55 @@ function WorkflowPage() {
     }
   };
 
+  const handleStudentAnswerChange = (questionNumber, value) => {
+    setStudentAnswers((prev) => ({
+      ...prev,
+      [questionNumber]: value
+    }));
+  };
+
+  const studentCanSubmit = useMemo(() => {
+    if (!selectedStudentAssignment || selectedStudentAssignment.alreadySubmitted) {
+      return false;
+    }
+    const questions = selectedStudentAssignment.questions || [];
+    if (questions.length === 0) {
+      return false;
+    }
+    return questions.every((question) => Boolean((studentAnswers[question.number] || '').trim()));
+  }, [selectedStudentAssignment, studentAnswers]);
+
   const handleStudentSubmission = async (e) => {
     e.preventDefault();
     resetMessages();
 
-    if (!studentAssignmentId || !studentAnswersFile) {
-      setError('Please select assignment and upload student answers file');
+    if (!selectedStudentAssignment || !currentStudentAssignmentId) {
+      setError('Open an assignment first');
+      return;
+    }
+
+    const answers = (selectedStudentAssignment.questions || []).map((question) => ({
+      questionNumber: question.number,
+      answer: (studentAnswers[question.number] || '').trim()
+    }));
+
+    if (answers.some((answer) => !answer.answer)) {
+      setError('Please answer all questions before submitting');
       return;
     }
 
     try {
       setLoading(true);
-      const formData = new FormData();
-      formData.append('assignmentId', studentAssignmentId);
-      formData.append('studentAnswersFile', studentAnswersFile);
-
       const response = await fetch(`${API_BASE}/student/submissions`, {
         method: 'POST',
-        headers: getAuthHeaders(),
-        body: formData
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          assignmentId: currentStudentAssignmentId,
+          answers
+        })
       });
 
       const data = await response.json();
@@ -315,33 +620,17 @@ function WorkflowPage() {
         throw new Error(data.message || 'Submission failed');
       }
 
-      setSuccess('Answer uploaded successfully');
-      setStudentAnswersFile(null);
+      setSuccess('Assignment submitted successfully');
+      showToast('✓ Assignment submitted', 'success');
+      setSelectedStudentAssignment(null);
+      setStudentAnswers({});
+
       await loadStudentAssignments(studentSubject);
       await loadStudentSubmissions();
-    } catch (e) {
-      setError(e.message || 'Submission failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleStudentViewResult = async (submissionId) => {
-    resetMessages();
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE}/student/results/${submissionId}`, {
-        headers: getAuthHeaders()
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Could not fetch result');
-      }
-      setStudentResult(data);
-      openReportPreview(data);
-      setSuccess('Released result loaded');
-    } catch (e) {
-      setError(e.message || 'Could not fetch result');
+      navigate('/evaluate/student/submissions');
+    } catch (err) {
+      setError(err.message || 'Submission failed');
+      showToast(`✕ ${err.message || 'Submission failed'}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -358,457 +647,91 @@ function WorkflowPage() {
       if (!response.ok) {
         throw new Error(data.message || 'Could not fetch result');
       }
-      openReportPreview(data);
-      setSuccess('Result preview opened');
-    } catch (e) {
-      setError(e.message || 'Could not fetch result');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTeacherDownloadResult = async (submissionId) => {
-    resetMessages();
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE}/teacher/results/${submissionId}`, {
-        headers: getAuthHeaders()
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Could not fetch result');
-      }
-
-      const reportHtml = buildReportHtml(data);
-      const fileName = `evaluation-report-${submissionId || Date.now()}.html`;
-      downloadReportHtml(reportHtml, fileName);
-      setSuccess('Report downloaded');
-    } catch (e) {
-      setError(e.message || 'Could not download report');
+      setStudentResult(data);
+      setSuccess('Evaluation details loaded');
+      showToast('✓ Evaluation details loaded', 'success');
+    } catch (err) {
+      setError(err.message || 'Could not fetch result');
+      showToast(`✕ ${err.message || 'Could not fetch result'}`, 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const buildReportHtml = (resultData) => {
-    const currentDate = new Date().toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-
     const results = {
       totalScore: resultData.totalScore ?? 0,
       totalMaxMarks: resultData.totalMaxMarks ?? 0,
       percentage: resultData.percentage ?? 0,
-      totalQuestions: resultData.totalQuestions ?? 0,
-      averageSimilarity: resultData.averageSimilarity ?? 0,
       questions: resultData.questions || []
     };
 
     return `
-  <!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Evaluation Report - ${currentDate}</title>
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-        
-      body {
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        color: #1a202c;
-      }
-        
-      .report-container {
-        max-width: 1200px;
-        margin: 0 auto;
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        overflow: hidden;
-      }
-        
-      .report-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 3rem 2rem;
-        text-align: center;
-      }
-        
-      .report-header h1 {
-        font-size: 2.5rem;
-        margin-bottom: 0.5rem;
-        font-weight: 700;
-      }
-        
-      .report-header p {
-        font-size: 1.1rem;
-        opacity: 0.9;
-      }
-        
-      .summary-section {
-        padding: 2rem;
-        background: #f7fafc;
-        border-bottom: 3px solid #e2e8f0;
-      }
-        
-      .summary-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1.5rem;
-        margin-top: 1.5rem;
-      }
-        
-      .summary-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        text-align: center;
-        border-left: 4px solid #667eea;
-      }
-        
-      .summary-card h3 {
-        font-size: 0.875rem;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #718096;
-        margin-bottom: 0.75rem;
-      }
-        
-      .summary-card .value {
-        font-size: 2rem;
-        font-weight: 800;
-        color: #667eea;
-      }
-        
-      .summary-card .percentage {
-        font-size: 1.25rem;
-        color: #48bb78;
-        margin-top: 0.5rem;
-      }
-        
-      .questions-section {
-        padding: 2rem;
-      }
-        
-      .question-card {
-        background: white;
-        border: 2px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 2rem;
-        margin-bottom: 2rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        page-break-inside: avoid;
-      }
-        
-      .question-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1.5rem;
-        padding-bottom: 1rem;
-        border-bottom: 2px solid #e2e8f0;
-      }
-        
-      .question-number {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #667eea;
-      }
-        
-      .score-badge {
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        color: white;
-        padding: 0.5rem 1.5rem;
-        border-radius: 20px;
-        font-weight: 700;
-        font-size: 1.1rem;
-      }
-        
-      .question-text {
-        background: #f7fafc;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1.5rem;
-        border-left: 4px solid #667eea;
-      }
-        
-      .question-text strong {
-        color: #667eea;
-        display: block;
-        margin-bottom: 0.5rem;
-        text-transform: uppercase;
-        font-size: 0.875rem;
-        letter-spacing: 0.5px;
-      }
-        
-      .answers-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1.5rem;
-        margin-bottom: 1.5rem;
-      }
-        
-      .answer-box {
-        background: #f7fafc;
-        padding: 1.5rem;
-        border-radius: 8px;
-        border: 2px solid #e2e8f0;
-      }
-        
-      .answer-box h4 {
-        font-size: 0.875rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 1rem;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-        
-      .model-answer h4 {
-        color: #48bb78;
-      }
-        
-      .student-answer h4 {
-        color: #4299e1;
-      }
-        
-      .answer-box p {
-        line-height: 1.7;
-        color: #2d3748;
-      }
-        
-      .metrics {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1rem;
-        padding: 1.5rem;
-        background: #edf2f7;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-      }
-        
-      .metric-item {
-        text-align: center;
-      }
-        
-      .metric-item span {
-        display: block;
-        font-size: 0.875rem;
-        color: #718096;
-        margin-bottom: 0.5rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-        
-      .metric-item strong {
-        font-size: 1.5rem;
-        color: #2d3748;
-      }
-        
-      .nli-badge {
-        display: inline-block;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-weight: 600;
-        font-size: 0.875rem;
-        text-transform: capitalize;
-      }
-        
-      .nli-badge.entailment {
-        background: #c6f6d5;
-        color: #22543d;
-      }
-        
-      .nli-badge.neutral {
-        background: #feebc8;
-        color: #7c2d12;
-      }
-        
-      .nli-badge.contradiction,
-      .nli-badge.low-similarity,
-      .nli-badge.low_similarity {
-        background: #fed7d7;
-        color: #742a2a;
-      }
-        
-      .feedback-box {
-        background: #edf2f7;
-        padding: 1.5rem;
-        border-radius: 8px;
-        border-left: 4px solid #667eea;
-        font-style: italic;
-        color: #2d3748;
-        line-height: 1.7;
-      }
-        
-      .footer {
-        background: #2d3748;
-        color: white;
-        padding: 2rem;
-        text-align: center;
-      }
-        
-      .footer p {
-        opacity: 0.8;
-      }
-        
-      @media print {
-        body {
-          background: white;
-          padding: 0;
-        }
-            
-        .report-container {
-          box-shadow: none;
-        }
-      }
-        
-      @media (max-width: 768px) {
-        .answers-grid {
-          grid-template-columns: 1fr;
-        }
-            
-        .summary-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="report-container">
-      <div class="report-header">
-        <h1>📊 Evaluation Report</h1>
-        <p>Generated on ${currentDate}</p>
-        <p style="margin-top: 0.5rem; font-size: 0.95rem; opacity: 0.85;">
-          Assignment: ${(resultData.assignment && resultData.assignment.title) || 'N/A'} | Subject: ${(resultData.assignment && resultData.assignment.subject) || 'N/A'}
-        </p>
-      </div>
-        
-      <div class="summary-section">
-        <h2 style="color: #2d3748; margin-bottom: 1rem;">Overall Performance</h2>
-        <div class="summary-grid">
-          <div class="summary-card">
-            <h3>Total Score</h3>
-            <div class="value">${Math.round(results.totalScore)}/${results.totalMaxMarks}</div>
-            <div class="percentage">${results.percentage.toFixed(1)}%</div>
-          </div>
-          <div class="summary-card">
-            <h3>Total Questions</h3>
-            <div class="value">${results.totalQuestions}</div>
-          </div>
-          <div class="summary-card">
-            <h3>Average Similarity</h3>
-            <div class="value">${(results.averageSimilarity * 100).toFixed(1)}%</div>
-          </div>
-        </div>
-      </div>
-        
-      <div class="questions-section">
-        <h2 style="color: #2d3748; margin-bottom: 2rem;">Detailed Analysis</h2>
-        ${results.questions.map((q, index) => `
-          <div class="question-card">
-            <div class="question-header">
-              <div class="question-number">Question ${index + 1}</div>
-              <div class="score-badge">${Math.round(q.score)} / ${q.maxMarks}</div>
-            </div>
-                    
-            <div class="question-text">
-              <strong>Question:</strong>
-              <p>${q.question}</p>
-            </div>
-                    
-            <div class="answers-grid">
-              <div class="answer-box model-answer">
-                <h4>✓ Model Answer</h4>
-                <p>${q.modelAnswer}</p>
-              </div>
-              <div class="answer-box student-answer">
-                <h4>👤 Student Answer</h4>
-                <p>${q.studentAnswer}</p>
-              </div>
-            </div>
-                    
-            <div class="metrics">
-              <div class="metric-item">
-                <span>Similarity Score</span>
-                <strong>${(q.similarity * 100).toFixed(0)}%</strong>
-              </div>
-              <div class="metric-item">
-                <span>NLI Result</span>
-                <strong><span class="nli-badge ${(q.nliLabel || '').toLowerCase().replace(/\s+/g, '-').replace(/_/g, '-')}">${q.nliLabel}</span></strong>
-              </div>
-            </div>
-                    
-            <div class="feedback-box">
-              <strong style="color: #667eea; font-style: normal; display: block; margin-bottom: 0.5rem;">💬 Feedback:</strong>
-              ${q.feedback}
-            </div>
-          </div>
-        `).join('')}
-      </div>
-        
-      <div class="footer">
-        <p>AI-Powered Answer Evaluation System</p>
-        <p style="margin-top: 0.5rem; font-size: 0.875rem;">This report was automatically generated by the evaluation system.</p>
-      </div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Evaluation Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+    h1, h2 { margin: 0 0 12px; }
+    .summary { margin-bottom: 16px; padding: 12px; border: 1px solid #ddd; }
+    .q { margin-bottom: 14px; padding: 12px; border: 1px solid #ddd; }
+    .label { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Evaluation Report</h1>
+  <div class="summary">
+    <div><span class="label">Assignment:</span> ${(resultData.assignment && resultData.assignment.title) || 'N/A'}</div>
+    <div><span class="label">Subject:</span> ${(resultData.assignment && resultData.assignment.subject) || 'N/A'}</div>
+    <div><span class="label">Score:</span> ${results.totalScore} / ${results.totalMaxMarks}</div>
+    <div><span class="label">Percentage:</span> ${results.percentage}%</div>
+  </div>
+  <h2>Question-wise</h2>
+  ${results.questions.map((question, index) => `
+    <div class="q">
+      <div><span class="label">Q${index + 1}:</span> ${question.question || ''}</div>
+      <div><span class="label">Score:</span> ${question.score} / ${question.maxMarks}</div>
+      <div><span class="label">Grade:</span> ${question.grade || question.nliLabel || 'N/A'}</div>
+      <div><span class="label">Model Answer:</span> ${question.modelAnswer || ''}</div>
+      <div><span class="label">Student Answer:</span> ${question.studentAnswer || ''}</div>
+      <div><span class="label">Feedback:</span> ${question.feedback || ''}</div>
     </div>
-  </body>
-  </html>
+  `).join('')}
+</body>
+</html>
     `;
   };
 
-  const openReportPreview = (resultData) => {
-    const reportHtml = buildReportHtml(resultData);
-    const blob = new Blob([reportHtml], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener,noreferrer');
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-  };
-
-  const downloadReportHtml = (reportHtml, fileName) => {
+  const handleDownloadReport = () => {
+    if (!studentResult) return;
+    const reportHtml = buildReportHtml(studentResult);
     const blob = new Blob([reportHtml], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = fileName;
+    a.download = `evaluation-report-${studentResult.submissionId || Date.now()}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  const handleDownloadStudentReport = () => {
-    if (!studentResult) {
-      return;
-    }
-
-    const reportHtml = buildReportHtml(studentResult);
-    const fileName = `evaluation-report-${studentResult.submissionId || Date.now()}.html`;
-    downloadReportHtml(reportHtml, fileName);
-  };
-
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   return (
     <div className="workflow-page">
       <Navbar />
+      <Toast
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast({ message: '', type: 'info' })}
+      />
+
       <div className="workflow-header">
-        <h1>{user.role === 'teacher' ? 'Teacher Assignment Dashboard' : 'Student Assignment Dashboard'}</h1>
+        <h1>{user.role === 'teacher' ? 'Teacher Dashboard' : 'Student Dashboard'}</h1>
         <p>Welcome, {user.name} ({user.role})</p>
       </div>
 
@@ -816,282 +739,177 @@ function WorkflowPage() {
       {success && <div className="workflow-alert success">{success}</div>}
 
       {user.role === 'teacher' && (
-        <>
-          <section className="workflow-section">
-            <h2>⚡ Direct Evaluation (Llama Pipeline)</h2>
-            <form className="workflow-form" onSubmit={async (e) => {
-              e.preventDefault();
-              resetMessages();
+        <div className="workflow-subnav">
+          <button type="button" className={isTeacherHome ? 'btn-secondary active-nav' : 'btn-secondary'} onClick={() => navigate('/evaluate/teacher')}>Dashboard</button>
+          <button type="button" className={isTeacherCreate ? 'btn-secondary active-nav' : 'btn-secondary'} onClick={() => navigate('/evaluate/teacher/create')}>Create Assignment</button>
+          <button type="button" className={(isTeacherAssignments || isTeacherAssignmentDetail) ? 'btn-secondary active-nav' : 'btn-secondary'} onClick={() => navigate('/evaluate/teacher/assignments')}>My Assignments</button>
+        </div>
+      )}
 
-              if (!teacherOverrides.questionsText || !teacherOverrides.studentAnswersText || !teacherOverrides.marksValue) {
-                setError('Please fill in Question, Marks, and Student Answer fields');
-                return;
-              }
+      {user.role === 'student' && (
+        <div className="workflow-subnav">
+          <button type="button" className={isStudentHome ? 'btn-secondary active-nav' : 'btn-secondary'} onClick={() => navigate('/evaluate/student')}>Dashboard</button>
+          <button type="button" className={(isStudentAssignments || isStudentAssignmentDetail) ? 'btn-secondary active-nav' : 'btn-secondary'} onClick={() => navigate('/evaluate/student/assignments')}>Assignments</button>
+          <button type="button" className={(isStudentSubmissions || isStudentResultDetail) ? 'btn-secondary active-nav' : 'btn-secondary'} onClick={() => navigate('/evaluate/student/submissions')}>My Submissions</button>
+        </div>
+      )}
 
-              try {
-                setLoading(true);
-                
-                // Step 1: Generate model answer from Colab via Llama
-                setSuccess('Generating model answer from Llama...');
-                const generatePayload = {
-                  question: teacherOverrides.questionsText,
-                  marks: teacherOverrides.marksValue
-                };
+      {user.role === 'teacher' && isTeacherHome && (
+        <section className="workflow-section">
+          <h2>Quick Actions</h2>
+          <div className="workflow-list compact-grid">
+            <div className="workflow-card">
+              <h3>Create New Assignment</h3>
+              <p>Build and publish a new assignment for your students.</p>
+              <div className="actions">
+                <button type="button" onClick={() => navigate('/evaluate/teacher/create')}>Go to Create</button>
+              </div>
+            </div>
+            <div className="workflow-card">
+              <h3>Manage Assignments</h3>
+              <p>Open assignment, evaluate responses, and release results.</p>
+              <div className="actions">
+                <button type="button" onClick={() => navigate('/evaluate/teacher/assignments')}>View Assignments</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
-                const generateResponse = await fetch(`${API_BASE}/generate-answer`, {
-                  method: 'POST',
-                  headers: {
-                    ...getAuthHeaders(),
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify(generatePayload)
-                });
+      {user.role === 'teacher' && isTeacherCreate && (
+        <section className="workflow-section">
+          <h2>Create Assignment</h2>
+          <form className="workflow-form" onSubmit={handleCreateAssignment}>
+            <input
+              type="text"
+              placeholder="Assignment title (optional)"
+              value={teacherForm.title}
+              onChange={(e) => setTeacherForm((prev) => ({ ...prev, title: e.target.value }))}
+              disabled={loading}
+            />
 
-                const generateData = await generateResponse.json();
-                if (!generateResponse.ok) {
-                  throw new Error(generateData.message || 'Failed to generate model answer');
-                }
+            <select
+              value={teacherForm.subject}
+              onChange={(e) => setTeacherForm((prev) => ({ ...prev, subject: e.target.value }))}
+              disabled={loading}
+            >
+              <option value="">Select subject</option>
+              {subjects.map((subject) => (
+                <option key={subject} value={subject}>{subject}</option>
+              ))}
+            </select>
 
-                const modelAnswer = generateData.answer || generateData.reference_answer || '';
-                if (!modelAnswer) {
-                  throw new Error('No model answer generated from Llama');
-                }
+            <input
+              type="datetime-local"
+              value={teacherForm.dueDate}
+              onChange={(e) => setTeacherForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+              disabled={loading}
+            />
 
-                setSuccess('Model answer generated. Now evaluating student answer...');
-
-                // Step 2: Evaluate student answer against generated model answer
-                const formData = new FormData();
-                formData.append('uploadMode', 'text');
-                
-                // Format question with marks: "Q1: [marks] question text"
-                const formattedQuestion = `Q1: [${teacherOverrides.marksValue} marks] ${teacherOverrides.questionsText}`;
-                formData.append('questionsText', formattedQuestion);
-                
-                // Format model answer: "A1: answer text"
-                const formattedModelAnswer = `A1: ${modelAnswer}`;
-                formData.append('modelAnswersText', formattedModelAnswer);
-                
-                // Format student answer: "A1: answer text"
-                const formattedStudentAnswer = `A1: ${teacherOverrides.studentAnswersText}`;
-                formData.append('studentAnswersText', formattedStudentAnswer);
-
-                const response = await fetch(`${API_BASE}/evaluate`, {
-                  method: 'POST',
-                  headers: getAuthHeaders(),
-                  body: formData
-                });
-
-                const data = await response.json();
-                if (!response.ok) {
-                  throw new Error(data.message || 'Evaluation failed');
-                }
-
-                setSuccess('✅ Evaluation completed! Results below.');
-                // Store results for display (backend returns top-level result fields)
-                const resultPayload = data.results || data;
-                setStudentResult({
-                  ...resultPayload,
-                  assignment: { title: 'Direct Evaluation', subject: 'N/A' },
-                  generatedModelAnswer: modelAnswer
-                });
-              } catch (e) {
-                setError(e.message || 'Evaluation failed');
-              } finally {
-                setLoading(false);
-              }
-            }}>
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Question</label>
+            {teacherForm.questions.map((question, index) => (
+              <div key={question.id} className="workflow-card">
+                <h3>Question {index + 1}</h3>
                 <textarea
                   rows="3"
-                  placeholder="What is machine learning? Explain with examples."
-                  value={teacherOverrides.questionsText}
-                  onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, questionsText: e.target.value }))}
-                  required
+                  placeholder="Enter question"
+                  value={question.question}
+                  onChange={(e) => updateTeacherQuestion(question.id, 'question', e.target.value)}
+                  disabled={loading}
                 />
-              </div>
-
-              <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem' }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Marks</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={teacherOverrides.marksValue}
-                    onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, marksValue: parseInt(e.target.value) || 5 }))}
-                    required
-                    style={{ width: '100%' }}
-                  />
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={question.marks}
+                  onChange={(e) => updateTeacherQuestion(question.id, 'marks', e.target.value)}
+                  disabled={loading}
+                />
+                <div className="actions">
+                  <button type="button" className="btn-secondary" disabled={loading} onClick={addTeacherQuestion}>Add Question</button>
+                  <button type="button" className="btn-secondary" disabled={loading || teacherForm.questions.length === 1} onClick={() => removeTeacherQuestion(question.id)}>Remove</button>
                 </div>
               </div>
+            ))}
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Student Answer</label>
-                <textarea
-                  rows="4"
-                  placeholder="Student's answer here..."
-                  value={teacherOverrides.studentAnswersText}
-                  onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studentAnswersText: e.target.value }))}
-                  required
-                />
+            <button type="submit" disabled={loading}>Create Assignment</button>
+          </form>
+        </section>
+      )}
+
+      {user.role === 'teacher' && isTeacherAssignments && (
+        <section className="workflow-section">
+          <h2>My Assignments</h2>
+          <div className="workflow-list">
+            {teacherAssignments.length === 0 && <p>No assignments yet.</p>}
+            {teacherAssignments.map((assignment) => (
+              <div key={assignment.id} className="workflow-card">
+                <div>
+                  <h3>{assignment.title}</h3>
+                  <p>{assignment.subject}</p>
+                  <p>Questions: {assignment.questionCount} | Total Marks: {assignment.totalMarks}</p>
+                  <p>Submissions: {assignment.submissionCount}</p>
+                  <p className="muted">Due: {formatDateTime(assignment.dueDate)}</p>
+                </div>
+                <div className="actions">
+                  <button type="button" disabled={loading} onClick={() => navigate(`/evaluate/teacher/assignments/${assignment.id}`)}>View Assignment</button>
+                </div>
               </div>
+            ))}
+          </div>
+        </section>
+      )}
 
-              <button type="submit" disabled={loading} style={{ marginTop: '1rem' }}>Evaluate with Llama</button>
-            </form>
+      {user.role === 'teacher' && isTeacherAssignmentDetail && selectedTeacherAssignment && (
+        <>
+          <section className="workflow-section">
+            <h2>{selectedTeacherAssignment.title}</h2>
+            <p>Subject: {selectedTeacherAssignment.subject}</p>
+            <p>Total Questions: {selectedTeacherAssignment.questionCount} | Total Marks: {selectedTeacherAssignment.totalMarks}</p>
+            <div className="actions">
+              <button type="button" className="btn-secondary" disabled={loading} onClick={() => navigate('/evaluate/teacher/assignments')}>Back to Assignments</button>
+              <button type="button" className="btn-evaluate-all" disabled={loading} onClick={handleTeacherEvaluateAll}>Evaluate All</button>
+              <button type="button" className="btn-secondary" disabled={loading} onClick={() => loadTeacherAssignmentDetail(currentTeacherAssignmentId)}>Refresh</button>
+            </div>
           </section>
 
-          {studentResult && (
+          <section className="workflow-section">
+            <h2>Student Submissions</h2>
+            <div className="workflow-list">
+              {teacherSubmissions.length === 0 && <p>No student submissions yet.</p>}
+              {teacherSubmissions.map((submission) => (
+                <div key={submission.id} className="workflow-card">
+                  <div>
+                    <h3>{submission.studentName || 'Student'}</h3>
+                    <p>{submission.studentEmail}</p>
+                    <p>Status: {submission.status}</p>
+                    <p className="muted">Submitted: {formatDateTime(submission.submittedAt)}</p>
+                    {submission.finalScore !== null && submission.finalScore !== undefined && (
+                      <p>Score: {submission.finalScore} / {submission.totalMaxMarks} ({submission.percentage}%)</p>
+                    )}
+                  </div>
+                  <div className="actions">
+                    <button type="button" className="btn-action" disabled={loading} onClick={() => handleTeacherViewSubmission(submission.id)}>View Submission</button>
+                    <button type="button" className="btn-evaluate" disabled={loading} onClick={() => handleTeacherEvaluateSubmission(submission.id)}>Evaluate</button>
+                    <button type="button" className="btn-secondary" disabled={loading || !submission.isEvaluated} onClick={() => handleTeacherViewResult(submission.id)}>View Evaluation</button>
+                    <button type="button" className="btn-secondary" disabled={loading || !submission.isEvaluated || submission.released} onClick={() => handleTeacherReleaseSubmission(submission.id)}>{submission.released ? 'Released' : 'Release'}</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {teacherSubmissionDetail && (
             <section className="workflow-section">
-              <h2>📊 Evaluation Results</h2>
-              <div className="workflow-card" style={{ marginBottom: '1.5rem' }}>
-                <div>
-                  <p><strong>Marks Awarded:</strong> {studentResult.totalScore} / {studentResult.totalMaxMarks}</p>
-                  <p><strong>Percentage:</strong> {studentResult.percentage}%</p>
-                  
-                  <hr style={{ margin: '1rem 0', borderColor: 'rgba(255,255,255,0.1)' }} />
-                  
-                  <p><strong>🤖 Model Answer (Generated by Llama):</strong></p>
-                  <div className="result-answer-box result-answer-model">
-                    <div className="result-answer-content">{normalizeAnswerText(studentResult.generatedModelAnswer || studentResult.questions?.[0]?.referenceAnswer)}</div>
-                  </div>
-                  
-                  <hr style={{ margin: '1rem 0', borderColor: 'rgba(255,255,255,0.1)' }} />
-                  
-                  <p><strong>📝 Student Answer:</strong></p>
-                  <div className="result-answer-box result-answer-student">
-                    <div className="result-answer-content">{normalizeAnswerText(studentResult.questions?.[0]?.studentAnswer)}</div>
-                  </div>
-                  
-                  <hr style={{ margin: '1rem 0', borderColor: 'rgba(255,255,255,0.1)' }} />
-                  
-                  <p><strong>Semantic Similarity:</strong> {((studentResult.questions?.[0]?.similarity || 0) * 100).toFixed(1)}%</p>
-                  <p><strong>Grade:</strong> {studentResult.questions?.[0]?.grade || 'N/A'}</p>
-                </div>
-                <button type="button" onClick={handleDownloadStudentReport} style={{ marginTop: '1rem' }}>📥 Download Report</button>
-              </div>
-            </section>
-          )}
-
-          <section className="workflow-section" style={{ display: 'none' }}>
-            <h2>Submissions for Selected Assignment</h2>
-
-            <div className="workflow-form inline-form">
-                <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Input Mode</label>
-                  <div style={{ display: 'flex', gap: '1rem' }}>
-                    <label className="radio-label">
-                      <input
-                        type="radio"
-                        name="inputMode"
-                        value="file"
-                        checked={teacherOverrides.inputMode === 'file'}
-                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, inputMode: e.target.value }))}
-                      />
-                      Upload Files
-                    </label>
-                    <label className="radio-label">
-                      <input
-                        type="radio"
-                        name="inputMode"
-                        value="text"
-                        checked={teacherOverrides.inputMode === 'text'}
-                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, inputMode: e.target.value }))}
-                      />
-                      Enter Text
-                    </label>
-                  </div>
-                </div>
-
-                {teacherOverrides.inputMode === 'file' ? (
-                  <>
-                    <label>
-                      Override Questions (optional)
-                      <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, questionsFile: e.target.files[0] || null }))} />
-                    </label>
-                    <label>
-                      Override Model Answers (optional)
-                      <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, modelAnswersFile: e.target.files[0] || null }))} />
-                    </label>
-                    <label>
-                      Override Student Answers (optional)
-                      <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studentAnswersFile: e.target.files[0] || null }))} />
-                    </label>
-                  </>
-                ) : (
-                  <>
-                    <label>
-                      Questions (Format: Q1: [5 marks] Question text)
-                      <textarea
-                        rows="4"
-                        placeholder="Q1: [5 marks] What is machine learning?&#10;Q2: [3 marks] Define neural networks?"
-                        value={teacherOverrides.questionsText}
-                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, questionsText: e.target.value }))}
-                      />
-                    </label>
-                    <label>
-                      Model Answers (Format: A1: Answer text)
-                      <textarea
-                        rows="4"
-                        placeholder="A1: Machine learning is a subset of AI...&#10;A2: Neural networks are computing systems..."
-                        value={teacherOverrides.modelAnswersText}
-                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, modelAnswersText: e.target.value }))}
-                      />
-                    </label>
-                    <label>
-                      Student Answers (Format: A1: Answer text)
-                      <textarea
-                        rows="4"
-                        placeholder="A1: Student's answer...&#10;A2: Student's answer..."
-                        value={teacherOverrides.studentAnswersText}
-                        onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studentAnswersText: e.target.value }))}
-                      />
-                    </label>
-                  </>
-                )}
-
-                <label>
-                  Override Study Material (optional)
-                  <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, studyMaterialFile: e.target.files[0] || null }))} />
-                </label>
-              </div>
-
+              <h2>Submission: {teacherSubmissionDetail.student?.name}</h2>
+              <p>{teacherSubmissionDetail.student?.email}</p>
+              <p>Status: {teacherSubmissionDetail.status}</p>
               <div className="workflow-list">
-                {teacherSubmissions.length === 0 && <p>No student submissions yet.</p>}
-                {teacherSubmissions.map((submission) => (
-                  <div key={submission.id} className="workflow-card">
-                    <div>
-                      <h3>{submission.studentName || 'Student'}</h3>
-                      <p>{submission.studentEmail}</p>
-                      <p>Status: {submission.status}</p>
-                      <p className="muted">Submitted: {formatDateTime(submission.submittedAt)}</p>
-                      {submission.finalScore !== null && submission.finalScore !== undefined && (
-                        <p>Score: {submission.finalScore} / {submission.totalMaxMarks} ({submission.percentage}%)</p>
-                      )}
-                    </div>
-                    <div className="actions">
-                      <button type="button" disabled={loading} onClick={() => handleTeacherEvaluateSubmission(submission.id)}>
-                        Evaluate
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() => handleTeacherViewResult(submission.id)}
-                        disabled={loading || submission.status === 'submitted'}
-                      >
-                        View Result
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() => handleTeacherDownloadResult(submission.id)}
-                        disabled={loading || submission.status === 'submitted'}
-                      >
-                        Download Report
-                      </button>
-                      <button type="button" disabled={loading || submission.released} onClick={() => handleTeacherReleaseSubmission(submission.id)}>
-                        {submission.released ? 'Released' : 'Release'}
-                      </button>
+                {(teacherSubmissionDetail.answers || []).map((item) => (
+                  <div key={item.questionNumber} className="workflow-card">
+                    <p><strong>Q{item.questionNumber}</strong> ({item.marks} marks)</p>
+                    <p>{item.question}</p>
+                    <div className="result-answer-box result-answer-student">
+                      <div className="result-answer-content">{item.studentAnswer || 'No answer'}</div>
                     </div>
                   </div>
                 ))}
@@ -1101,80 +919,182 @@ function WorkflowPage() {
         </>
       )}
 
-      {user.role === 'student' && (
-        <>
-          <section className="workflow-section">
-            <h2>Upload Answers</h2>
-            <form className="workflow-form" onSubmit={handleStudentSubmission}>
-              <select value={studentSubject} onChange={handleStudentSubjectChange}>
-                <option value="">All Subjects</option>
-                {subjects.map((subject) => (
-                  <option key={subject} value={subject}>{subject}</option>
-                ))}
-              </select>
-
-              <select value={studentAssignmentId} onChange={(e) => setStudentAssignmentId(e.target.value)}>
-                <option value="">Select Assignment</option>
-                {studentAssignments.map((assignment) => (
-                  <option key={assignment.id} value={assignment.id} disabled={assignment.alreadySubmitted}>
-                    {assignment.title} - {assignment.subject} {assignment.alreadySubmitted ? '(Submitted)' : ''}
-                  </option>
-                ))}
-              </select>
-
-              <label>
-                Student Answer Doc
-                <input type="file" onChange={(e) => setStudentAnswersFile(e.target.files[0] || null)} />
-              </label>
-
-              <button type="submit" disabled={loading}>Submit Answer</button>
-            </form>
-          </section>
-
-          <section className="workflow-section">
-            <h2>My Submissions</h2>
-            <div className="workflow-list">
-              {studentSubmissions.length === 0 && <p>No submissions yet.</p>}
-              {studentSubmissions.map((submission) => (
-                <div key={submission.id} className="workflow-card">
-                  <div>
-                    <h3>{submission.assignmentTitle || 'Assignment'}</h3>
-                    <p>{submission.subject}</p>
-                    <p>Status: {submission.status}</p>
-                    <p className="muted">Submitted: {formatDateTime(submission.submittedAt)}</p>
-                    {submission.canViewResult && (
-                      <p>Score: {submission.finalScore} / {submission.totalMaxMarks} ({submission.percentage}%)</p>
-                    )}
-                  </div>
-                  <div className="actions">
-                    {submission.canViewResult ? (
-                      <button type="button" disabled={loading} onClick={() => handleStudentViewResult(submission.id)}>
-                        View Result
-                      </button>
-                    ) : (
-                      <span className="muted">Waiting for teacher release</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {studentResult && (
-            <section className="workflow-section">
-              <h2>Released Result</h2>
-              <div className="workflow-card">
-                <div>
-                  <p><strong>Assignment:</strong> {(studentResult.assignment && studentResult.assignment.title) || 'N/A'}</p>
-                  <p><strong>Subject:</strong> {(studentResult.assignment && studentResult.assignment.subject) || 'N/A'}</p>
-                  <p><strong>Total Score:</strong> {studentResult.totalScore} / {studentResult.totalMaxMarks}</p>
-                  <p><strong>Percentage:</strong> {studentResult.percentage}%</p>
-                </div>
-                <button type="button" onClick={handleDownloadStudentReport}>Download Report</button>
+      {user.role === 'student' && isStudentHome && (
+        <section className="workflow-section">
+          <h2>Quick Actions</h2>
+          <div className="workflow-list compact-grid">
+            <div className="workflow-card">
+              <h3>Open Assignments</h3>
+              <p>Find pending assignments and submit answers.</p>
+              <div className="actions">
+                <button type="button" onClick={() => navigate('/evaluate/student/assignments')}>Go to Assignments</button>
               </div>
-            </section>
-          )}
-        </>
+            </div>
+            <div className="workflow-card">
+              <h3>My Submissions</h3>
+              <p>Track status and view released results.</p>
+              <div className="actions">
+                <button type="button" onClick={() => navigate('/evaluate/student/submissions')}>View Submissions</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {user.role === 'student' && isStudentAssignments && (
+        <section className="workflow-section">
+          <h2>Available Assignments</h2>
+          <select value={studentSubject} onChange={handleStudentSubjectChange} disabled={loading}>
+            <option value="">All Subjects</option>
+            {subjects.map((subject) => (
+              <option key={subject} value={subject}>{subject}</option>
+            ))}
+          </select>
+
+          <div className="workflow-list">
+            {studentAssignments.length === 0 && <p>No assignments available.</p>}
+            {studentAssignments.map((assignment) => (
+              <div key={assignment.id} className="workflow-card">
+                <div>
+                  <h3>{assignment.title}</h3>
+                  <p>{assignment.subject}</p>
+                  <p>Questions: {assignment.questionCount} | Total Marks: {assignment.totalMarks}</p>
+                  <p className="muted">Due: {formatDateTime(assignment.dueDate)}</p>
+                  <p>{assignment.alreadySubmitted ? 'Submitted' : 'Pending'}</p>
+                </div>
+                <button type="button" className="btn-secondary" disabled={loading || assignment.alreadySubmitted} onClick={() => navigate(`/evaluate/student/assignments/${assignment.id}`)}>{assignment.alreadySubmitted ? 'Submitted' : 'Open Assignment'}</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {user.role === 'student' && isStudentAssignmentDetail && selectedStudentAssignment && (
+        <section className="workflow-section">
+          <h2>{selectedStudentAssignment.title}</h2>
+          <p>Subject: {selectedStudentAssignment.subject}</p>
+          <p>Total Marks: {selectedStudentAssignment.totalMarks}</p>
+          <div className="actions">
+            <button type="button" className="btn-secondary" onClick={() => navigate('/evaluate/student/assignments')}>Back to Assignments</button>
+          </div>
+
+          <form className="workflow-form" onSubmit={handleStudentSubmission}>
+            {(selectedStudentAssignment.questions || []).map((question) => (
+              <div key={question.number} className="workflow-card">
+                <p><strong>Q{question.number}</strong> ({question.marks} marks)</p>
+                <p>{question.question}</p>
+                <textarea
+                  rows="4"
+                  placeholder="Write your answer"
+                  value={studentAnswers[question.number] || ''}
+                  onChange={(e) => handleStudentAnswerChange(question.number, e.target.value)}
+                  disabled={loading || selectedStudentAssignment.alreadySubmitted}
+                />
+              </div>
+            ))}
+
+            <button type="submit" disabled={loading || !studentCanSubmit || selectedStudentAssignment.alreadySubmitted}>{selectedStudentAssignment.alreadySubmitted ? 'Submitted' : 'Submit Assignment'}</button>
+          </form>
+        </section>
+      )}
+
+      {user.role === 'student' && isStudentSubmissions && (
+        <section className="workflow-section">
+          <h2>My Submissions</h2>
+          <div className="workflow-list">
+            {studentSubmissions.length === 0 && <p>No submissions yet.</p>}
+            {studentSubmissions.map((submission) => (
+              <div key={submission.id} className="workflow-card">
+                <div>
+                  <h3>{submission.assignmentTitle || 'Assignment'}</h3>
+                  <p>{submission.subject}</p>
+                  <p>Status: {submission.status}</p>
+                  <p className="muted">Submitted: {formatDateTime(submission.submittedAt)}</p>
+                  {submission.canViewResult && (
+                    <p>Score: {submission.finalScore} / {submission.totalMaxMarks} ({submission.percentage}%)</p>
+                  )}
+                </div>
+                <div className="actions">
+                  {submission.canViewResult ? (
+                    <button type="button" disabled={loading} onClick={() => navigate(`/evaluate/student/results/${submission.id}`)}>View Result</button>
+                  ) : (
+                    <span className="muted">Waiting for teacher release</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {user.role === 'student' && isStudentResultDetail && studentResult && (
+        <section className="workflow-section">
+          <h2>Evaluation Details</h2>
+          <div className="workflow-card">
+            <div>
+              <p><strong>Assignment:</strong> {(studentResult.assignment && studentResult.assignment.title) || 'N/A'}</p>
+              <p><strong>Subject:</strong> {(studentResult.assignment && studentResult.assignment.subject) || 'N/A'}</p>
+              <p><strong>Total Score:</strong> {studentResult.totalScore} / {studentResult.totalMaxMarks}</p>
+              <p><strong>Percentage:</strong> {studentResult.percentage}%</p>
+            </div>
+            <div className="actions">
+              <button type="button" className="btn-secondary" onClick={() => navigate('/evaluate/student/submissions')}>Back to Submissions</button>
+              <button type="button" onClick={handleDownloadReport}>Download Report</button>
+            </div>
+          </div>
+
+          <div className="workflow-list">
+            {(studentResult.questions || []).map((question) => (
+              <div key={question.questionNumber} className="workflow-card">
+                <p><strong>Q{question.questionNumber}</strong> ({question.maxMarks} marks)</p>
+                <p>{question.question}</p>
+                <p><strong>Score:</strong> {question.score} / {question.maxMarks}</p>
+                <p><strong>Grade:</strong> {question.grade || question.nliLabel || 'N/A'}</p>
+                <p><strong>Similarity:</strong> {((question.similarity || 0) * 100).toFixed(1)}%</p>
+                <div className="result-answer-box result-answer-model">
+                  <div className="result-answer-content"><strong>Model:</strong> {question.modelAnswer || 'N/A'}</div>
+                </div>
+                <div className="result-answer-box result-answer-student">
+                  <div className="result-answer-content"><strong>Student:</strong> {question.studentAnswer || 'N/A'}</div>
+                </div>
+                <p><strong>Feedback:</strong> {question.feedback || 'N/A'}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {studentResult && user.role === 'teacher' && (
+        <section className="workflow-section">
+          <h2>Evaluation Details</h2>
+          <div className="workflow-card">
+            <div>
+              <p><strong>Assignment:</strong> {(studentResult.assignment && studentResult.assignment.title) || 'N/A'}</p>
+              <p><strong>Subject:</strong> {(studentResult.assignment && studentResult.assignment.subject) || 'N/A'}</p>
+              <p><strong>Total Score:</strong> {studentResult.totalScore} / {studentResult.totalMaxMarks}</p>
+              <p><strong>Percentage:</strong> {studentResult.percentage}%</p>
+            </div>
+          </div>
+
+          <div className="workflow-list">
+            {(studentResult.questions || []).map((question) => (
+              <div key={question.questionNumber} className="workflow-card">
+                <p><strong>Q{question.questionNumber}</strong> ({question.maxMarks} marks)</p>
+                <p>{question.question}</p>
+                <p><strong>Score:</strong> {question.score} / {question.maxMarks}</p>
+                <p><strong>Grade:</strong> {question.grade || question.nliLabel || 'N/A'}</p>
+                <p><strong>Similarity:</strong> {((question.similarity || 0) * 100).toFixed(1)}%</p>
+                <div className="result-answer-box result-answer-model">
+                  <div className="result-answer-content"><strong>Llama Answer:</strong> {question.modelAnswer || 'N/A'}</div>
+                </div>
+                <div className="result-answer-box result-answer-student">
+                  <div className="result-answer-content"><strong>Student Answer:</strong> {question.studentAnswer || 'N/A'}</div>
+                </div>
+                <p><strong>Feedback:</strong> {question.feedback || 'N/A'}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );

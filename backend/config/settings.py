@@ -29,6 +29,10 @@ class Config:
     # External Llama Pipeline API Configuration
     LLAMA_API_BASE_URL = os.getenv('LLAMA_API_BASE_URL', os.getenv('KAGGLE_NGROK_URL', ''))
     LLAMA_TIMEOUT_SECONDS = int(os.getenv('LLAMA_TIMEOUT_SECONDS', 120))
+    LLAMA_EVALUATE_TIMEOUT_SECONDS = int(os.getenv('LLAMA_EVALUATE_TIMEOUT_SECONDS', 300))
+    LLAMA_GENERATE_TIMEOUT_SECONDS = int(os.getenv('LLAMA_GENERATE_TIMEOUT_SECONDS', 900))
+    LLAMA_BATCH_TIMEOUT_SECONDS = int(os.getenv('LLAMA_BATCH_TIMEOUT_SECONDS', 600))
+    LLAMA_RETRY_COUNT = int(os.getenv('LLAMA_RETRY_COUNT', 1))
     
     @staticmethod
     def init_app(app):
