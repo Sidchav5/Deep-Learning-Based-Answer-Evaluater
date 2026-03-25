@@ -9,11 +9,19 @@ from typing import Dict, List
 
 from config import Config
 from models import ml_models
+from services.llama_service import llama_service, LlamaApiError
 from services.rag_service import rag_service
 
 
 class EvaluationService:
     """Service for evaluating student answers"""
+
+    @staticmethod
+    def _safe_float(value, default=0.0) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
 
     @staticmethod
     def _tokenize(text: str) -> set:
@@ -175,6 +183,247 @@ class EvaluationService:
         }
         
         return result
+
+    @staticmethod
+    def evaluate_answer_llama(
+        question: str,
+        reference: str,
+        student: str,
+        marks: float
+    ) -> Dict:
+        """Evaluate one answer using external Llama pipeline."""
+
+        if not student or not isinstance(student, str):
+            return {
+                'finalScore': 0,
+                'maxMarks': float(marks),
+                'similarity': 0.0,
+                'nliLabel': 'EMPTY_ANSWER',
+                'nliConfidence': 0.0,
+                'feedback': 'No answer provided. Please submit a response to receive marks.',
+                'llamaEnabled': False,
+                'contextUsed': 0
+            }
+
+        if len(student.strip()) < 10:
+            return {
+                'finalScore': 0,
+                'maxMarks': float(marks),
+                'similarity': 0.0,
+                'nliLabel': 'INSUFFICIENT_LENGTH',
+                'nliConfidence': 0.0,
+                'feedback': 'Answer is too short. Please provide a more complete response with sufficient detail.',
+                'llamaEnabled': False,
+                'contextUsed': 0
+            }
+
+        if not llama_service.is_available():
+            raise Exception('Llama API is not configured. Set LLAMA_API_BASE_URL in backend/.env.')
+
+        try:
+            llama_result = llama_service.evaluate_answer(
+                question=question,
+                reference=reference,
+                student=student,
+                marks=marks,
+                use_generated_reference=bool(Config.LLAMA_USE_GENERATED_REFERENCE)
+            )
+        except LlamaApiError as e:
+            raise Exception(str(e))
+
+        if not llama_result:
+            raise Exception('No response payload from Llama evaluation API')
+
+        similarity = EvaluationService._safe_float(
+            llama_result.get('semantic_similarity', llama_result.get('similarity', 0.0)),
+            0.0
+        )
+
+        awarded_marks = llama_result.get('awarded_marks')
+        if awarded_marks is None:
+            awarded_marks = llama_result.get('final_score', 0.0)
+
+        score = EvaluationService._safe_float(awarded_marks, 0.0)
+        # Some APIs return normalized score (0..1); map to marks if needed.
+        if score <= 1.0 and float(marks) > 1.0:
+            score *= float(marks)
+
+        nli_label = str(
+            llama_result.get('nli_label')
+            or llama_result.get('nliLabel')
+            or 'ENTAILMENT'
+        ).upper().replace(' ', '_')
+
+        feedback = str(
+            llama_result.get('feedback')
+            or llama_result.get('explanation')
+            or 'Llama pipeline evaluation completed.'
+        )
+
+        if feedback == 'Llama pipeline evaluation completed.':
+            grade = str(llama_result.get('grade', '')).strip()
+            keyword_coverage = EvaluationService._safe_float(llama_result.get('keyword_coverage', 0.0), 0.0)
+            if grade:
+                feedback = (
+                    f"Llama grade: {grade}. "
+                    f"Semantic similarity: {round(similarity, 4)}, "
+                    f"keyword coverage: {round(keyword_coverage, 4)}."
+                )
+
+        score = max(0.0, min(score, float(marks)))
+
+        return {
+            'finalScore': int(round(score)),
+            'maxMarks': float(marks),
+            'similarity': float(round(similarity, 4)),
+            'nliLabel': nli_label,
+            'nliConfidence': float(round(EvaluationService._safe_float(llama_result.get('confidence', 0.0), 0.0), 4)),
+            'feedback': feedback,
+            'llamaEnabled': True,
+            'contextUsed': int(EvaluationService._safe_float(llama_result.get('context_used', 0), 0)),
+            'llamaReferenceAnswer': str(llama_result.get('reference_answer') or '').strip()
+        }
+
+    @staticmethod
+    def evaluate_answer_combined(
+        question: str,
+        reference: str,
+        student: str,
+        marks: float,
+        use_rag: bool = False
+    ) -> Dict:
+        """Evaluate with both local ML and Llama, then blend scores."""
+        local_result = EvaluationService.evaluate_answer(
+            question=question,
+            reference=reference,
+            student=student,
+            marks=marks,
+            use_rag=use_rag
+        )
+        llama_result = EvaluationService.evaluate_answer_llama(
+            question=question,
+            reference=reference,
+            student=student,
+            marks=marks
+        )
+
+        local_score = EvaluationService._safe_float(local_result.get('finalScore', 0.0))
+        llama_score = EvaluationService._safe_float(llama_result.get('finalScore', 0.0))
+        local_similarity = EvaluationService._safe_float(local_result.get('similarity', 0.0))
+        llama_similarity = EvaluationService._safe_float(llama_result.get('similarity', 0.0))
+
+        combined_score = (local_score * 0.5) + (llama_score * 0.5)
+        combined_similarity = (local_similarity * 0.5) + (llama_similarity * 0.5)
+        combined_score = max(0.0, min(combined_score, float(marks)))
+
+        local_feedback = str(local_result.get('feedback', '')).strip()
+        llama_feedback = str(llama_result.get('feedback', '')).strip()
+        combined_feedback = (
+            f"Combined evaluation completed. Local ML score: {int(round(local_score))}/{int(float(marks))}, "
+            f"Llama score: {int(round(llama_score))}/{int(float(marks))}. "
+            f"Local feedback: {local_feedback} Llama feedback: {llama_feedback}"
+        )
+
+        return {
+            'finalScore': int(round(combined_score)),
+            'maxMarks': float(marks),
+            'similarity': float(round(combined_similarity, 4)),
+            'nliLabel': local_result.get('nliLabel', 'COMBINED'),
+            'nliConfidence': float(round(EvaluationService._safe_float(local_result.get('nliConfidence', 0.0), 0.0), 4)),
+            'feedback': combined_feedback,
+            'ragEnabled': local_result.get('ragEnabled', False),
+            'llamaEnabled': llama_result.get('llamaEnabled', True),
+            'contextUsed': int(local_result.get('contextUsed', 0)) + int(llama_result.get('contextUsed', 0)),
+            'llamaReferenceAnswer': str(llama_result.get('llamaReferenceAnswer') or '').strip()
+        }
+
+    @staticmethod
+    def evaluate_batch_mode(
+        questions: List[Dict],
+        model_answers: List[Dict],
+        student_answers: List[Dict],
+        mode: str,
+        use_rag: bool = False
+    ) -> Dict:
+        """Evaluate in selected mode: local, llama, or auto(combined)."""
+        selected_mode = (mode or Config.EVALUATION_MODE or 'auto').lower()
+        if selected_mode == 'combined':
+            selected_mode = 'auto'
+
+        model_dict = {a['number']: a['answer'] for a in model_answers}
+        student_dict = {a['number']: a['answer'] for a in student_answers}
+
+        results_list = []
+        total_score = 0
+        total_max_marks = 0
+        total_similarity = 0
+
+        for q in questions:
+            q_num = q['number']
+            model_ans = model_dict.get(q_num, '')
+            student_ans = student_dict.get(q_num, '')
+
+            if not model_ans or not student_ans:
+                continue
+
+            if selected_mode == 'local':
+                eval_result = EvaluationService.evaluate_answer(
+                    question=q['question'],
+                    reference=model_ans,
+                    student=student_ans,
+                    marks=q['marks'],
+                    use_rag=use_rag
+                )
+            elif selected_mode == 'llama':
+                eval_result = EvaluationService.evaluate_answer_llama(
+                    question=q['question'],
+                    reference=model_ans,
+                    student=student_ans,
+                    marks=q['marks']
+                )
+            else:
+                eval_result = EvaluationService.evaluate_answer_combined(
+                    question=q['question'],
+                    reference=model_ans,
+                    student=student_ans,
+                    marks=q['marks'],
+                    use_rag=use_rag
+                )
+
+            question_result = {
+                'questionNumber': q_num,
+                'question': q['question'],
+                'modelAnswer': model_ans,
+                'teacherModelAnswer': model_ans,
+                'llamaModelAnswer': str(eval_result.get('llamaReferenceAnswer') or '').strip(),
+                'studentAnswer': student_ans,
+                'score': float(eval_result['finalScore']),
+                'maxMarks': float(eval_result['maxMarks']),
+                'similarity': float(eval_result['similarity']),
+                'nliLabel': str(eval_result['nliLabel']).lower().replace('_', ' '),
+                'feedback': eval_result['feedback'],
+                'ragEnabled': eval_result.get('ragEnabled', False),
+                'llamaEnabled': eval_result.get('llamaEnabled', selected_mode in ['llama', 'auto']),
+                'contextUsed': eval_result.get('contextUsed', 0)
+            }
+
+            results_list.append(question_result)
+            total_score += eval_result['finalScore']
+            total_max_marks += eval_result['maxMarks']
+            total_similarity += eval_result['similarity']
+
+        total_questions = len(results_list)
+        percentage = (total_score / total_max_marks * 100) if total_max_marks > 0 else 0
+        average_similarity = total_similarity / total_questions if total_questions > 0 else 0
+
+        return {
+            'totalScore': float(round(total_score, 2)),
+            'totalMaxMarks': float(total_max_marks),
+            'percentage': float(round(percentage, 2)),
+            'totalQuestions': int(total_questions),
+            'averageSimilarity': float(round(average_similarity, 4)),
+            'questions': results_list
+        }
     
     @staticmethod
     def _generate_basic_feedback(similarity: float, nli_label: str, score: float, max_marks: float) -> str:
@@ -318,6 +567,8 @@ class EvaluationService:
                 'questionNumber': q_num,
                 'question': q['question'],
                 'modelAnswer': model_ans,
+                'teacherModelAnswer': model_ans,
+                'llamaModelAnswer': '',
                 'studentAnswer': student_ans,
                 'score': float(eval_result['finalScore']),
                 'maxMarks': float(eval_result['maxMarks']),
@@ -397,6 +648,8 @@ class EvaluationService:
                 'questionNumber': q_num,
                 'question': q['question'],
                 'modelAnswer': model_ans,
+                'teacherModelAnswer': model_ans,
+                'llamaModelAnswer': '',
                 'studentAnswer': student_ans,
                 'score': float(eval_result['finalScore']),
                 'maxMarks': float(eval_result['maxMarks']),

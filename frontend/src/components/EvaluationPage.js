@@ -1,5 +1,5 @@
 // src/components/EvaluationPage.js
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../EvaluationPage.css';
 
@@ -10,6 +10,7 @@ function EvaluationPage() {
     modelAnswersFile: null,
     studentAnswersFile: null,
     studyMaterialFile: null,
+    evaluationMode: 'auto',
     useRAG: false,
     questionsText: '',
     modelAnswersText: '',
@@ -133,6 +134,9 @@ function EvaluationPage() {
         formDataToSend.append('questionsFile', formData.questionsFile);
         formDataToSend.append('modelAnswersFile', formData.modelAnswersFile);
         formDataToSend.append('studentAnswersFile', formData.studentAnswersFile);
+        if (formData.useRAG && formData.studyMaterialFile) {
+          formDataToSend.append('studyMaterialFile', formData.studyMaterialFile);
+        }
       } else {
         formDataToSend.append('questionsText', formData.questionsText);
         formDataToSend.append('modelAnswersText', formData.modelAnswersText);
@@ -140,6 +144,8 @@ function EvaluationPage() {
       }
       
       formDataToSend.append('uploadMode', uploadMode);
+      formDataToSend.append('useRAG', String(formData.useRAG));
+      formDataToSend.append('evaluationMode', formData.evaluationMode);
 
       const token = localStorage.getItem('token');
       const response = await fetch('http://localhost:5000/api/evaluate', {
@@ -168,7 +174,7 @@ function EvaluationPage() {
           localStorage.removeItem('user');
           setTimeout(() => navigate('/login'), 2000);
         } else if (response.status === 503) {
-          setError('ML models are not loaded. Please contact administrator or wait for models to load.');
+          setError(data.message || 'Selected evaluation mode is not available right now.');
         } else {
           setError(data.message || 'Evaluation failed');
         }
@@ -187,6 +193,7 @@ function EvaluationPage() {
       modelAnswersFile: null,
       studentAnswersFile: null,
       studyMaterialFile: null,
+      evaluationMode: 'auto',
       useRAG: false,
       questionsText: '',
       modelAnswersText: '',
@@ -531,9 +538,15 @@ function EvaluationPage() {
                     
                     <div class="answers-grid">
                         <div class="answer-box model-answer">
-                            <h4>✓ Model Answer</h4>
-                            <p>${q.modelAnswer}</p>
+                        <h4>✓ Teacher Model Answer</h4>
+                        <p>${q.teacherModelAnswer || q.modelAnswer}</p>
                         </div>
+                      ${q.llamaModelAnswer ? `
+                      <div class="answer-box model-answer">
+                        <h4>🤖 Llama Generated Reference</h4>
+                        <p>${q.llamaModelAnswer}</p>
+                      </div>
+                      ` : ''}
                         <div class="answer-box student-answer">
                             <h4>👤 Student Answer</h4>
                             <p>${q.studentAnswer}</p>
@@ -684,6 +697,26 @@ function EvaluationPage() {
 
         {/* Main Form */}
         <form onSubmit={handleSubmit} className="eval-form glass-card">
+          <div className="eval-mode-section glass-effect">
+            <div className="eval-mode-label">
+              <i className="fa-solid fa-sliders"></i>
+              <span>Evaluation Mode</span>
+            </div>
+            <select
+              className="eval-mode-select"
+              value={formData.evaluationMode}
+              onChange={(e) => setFormData({ ...formData, evaluationMode: e.target.value })}
+              disabled={loading}
+            >
+              <option value="auto">Auto (Combined: Local + Llama)</option>
+              <option value="local">Local (ANN + SBERT + NLI)</option>
+              <option value="llama">Llama API Only</option>
+            </select>
+            <small className="eval-mode-hint">
+              Auto runs both Local and Llama and combines scores.
+            </small>
+          </div>
+
           {uploadMode === 'file' ? (
             <>
               {/* File Upload Sections */}
@@ -931,10 +964,20 @@ function EvaluationPage() {
                       <div className="answer-card model">
                         <div className="answer-header">
                           <i className="fa-solid fa-check-circle"></i>
-                          <h4>Model Answer</h4>
+                          <h4>Teacher Model Answer</h4>
                         </div>
-                        <p>{q.modelAnswer}</p>
+                        <p>{q.teacherModelAnswer || q.modelAnswer}</p>
                       </div>
+
+                      {q.llamaModelAnswer && (
+                        <div className="answer-card model">
+                          <div className="answer-header">
+                            <i className="fa-solid fa-robot"></i>
+                            <h4>Llama Generated Reference</h4>
+                          </div>
+                          <p>{q.llamaModelAnswer}</p>
+                        </div>
+                      )}
 
                       <div className="answer-card student">
                         <div className="answer-header">

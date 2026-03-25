@@ -10,7 +10,7 @@ from pymongo import MongoClient
 
 from config import Config
 from models import ml_models
-from services import evaluation_service, rag_service
+from services import evaluation_service, rag_service, llama_service
 from utils.auth import token_required
 from utils.file_processing import allowed_file, extract_text_from_file
 from utils.parsers import parse_answers, parse_questions
@@ -421,10 +421,28 @@ def evaluate_submission(payload, submission_id):
         if not role_guard(payload, 'teacher'):
             return jsonify({'message': 'Only teachers can evaluate submissions'}), 403
 
-        if not ml_models.is_loaded:
+        requested_mode = (request.form.get('evaluationMode', '') or '').strip().lower()
+        model_mode = requested_mode or (Config.EVALUATION_MODE or 'auto').lower()
+        if model_mode == 'combined':
+            model_mode = 'auto'
+        if model_mode not in ['local', 'llama', 'auto']:
+            return jsonify({'message': 'Invalid evaluation mode. Use local, llama, or auto.'}), 400
+
+        if model_mode in ['local', 'auto'] and not ml_models.is_loaded:
             ml_models.ensure_loaded(force_reload=True)
 
-        model_mode = 'ml' if ml_models.is_loaded else 'fallback'
+        if model_mode == 'local' and not ml_models.is_loaded:
+            return jsonify({'message': 'Local ML models are not loaded for local mode.'}), 503
+
+        if model_mode == 'llama' and not llama_service.is_available():
+            return jsonify({'message': 'Llama API is not configured for llama mode.'}), 503
+
+        if model_mode == 'auto' and (not ml_models.is_loaded or not llama_service.is_available()):
+            return jsonify({
+                'message': 'Auto mode requires both local ML models and Llama API configured.',
+                'localModelsLoaded': bool(ml_models.is_loaded),
+                'llamaConfigured': bool(llama_service.is_available())
+            }), 503
 
         submission_object_id = parse_object_id(submission_id)
         if not submission_object_id:
@@ -490,20 +508,13 @@ def evaluate_submission(payload, submission_id):
                 }
             )
 
-        if model_mode == 'ml':
-            results = evaluation_service.evaluate_batch(
-                questions=questions,
-                model_answers=model_answers,
-                student_answers=student_answers,
-                use_rag=rag_enabled_for_eval
-            )
-        else:
-            results = evaluation_service.evaluate_batch_fallback(
-                questions=questions,
-                model_answers=model_answers,
-                student_answers=student_answers,
-                use_rag=False
-            )
+        results = evaluation_service.evaluate_batch_mode(
+            questions=questions,
+            model_answers=model_answers,
+            student_answers=student_answers,
+            mode=model_mode,
+            use_rag=rag_enabled_for_eval
+        )
 
         results = convert_numpy_types(results)
 
@@ -537,7 +548,7 @@ def evaluate_submission(payload, submission_id):
         )
 
         return jsonify({
-            'message': 'Submission evaluated successfully' if model_mode == 'ml' else 'Submission evaluated using fallback mode (ML unavailable)',
+            'message': 'Submission evaluated successfully',
             'submissionId': submission_id,
             'evaluationMode': model_mode,
             **results

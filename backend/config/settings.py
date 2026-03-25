@@ -53,6 +53,22 @@ class Config:
     
     # Vector Store Configuration
     VECTOR_STORE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'vector_store')
+
+    # Evaluation Mode Configuration
+    # local: ANN + SBERT + NLI
+    # llama: external Llama API only
+    # auto: combined local + llama scoring (no fallback)
+    EVALUATION_MODE = os.getenv('EVALUATION_MODE', 'auto').lower()
+
+    # External Llama API Configuration
+    LLAMA_API_BASE_URL = os.getenv('LLAMA_API_BASE_URL', os.getenv('KAGGLE_NGROK_URL', ''))
+    LLAMA_TIMEOUT_SECONDS = int(os.getenv('LLAMA_TIMEOUT_SECONDS', 120))
+    LLAMA_HEALTH_PATH = os.getenv('LLAMA_HEALTH_PATH', '/health')
+    LLAMA_EVALUATE_PATH = os.getenv('LLAMA_EVALUATE_PATH', '/evaluate')
+    LLAMA_BATCH_EVALUATE_PATH = os.getenv('LLAMA_BATCH_EVALUATE_PATH', '/batch-evaluate')
+    LLAMA_GENERATE_PATH = os.getenv('LLAMA_GENERATE_PATH', '/generate-answer')
+    LLAMA_PREFER_BATCH_EVALUATE = os.getenv('LLAMA_PREFER_BATCH_EVALUATE', 'True').lower() == 'true'
+    LLAMA_USE_GENERATED_REFERENCE = os.getenv('LLAMA_USE_GENERATED_REFERENCE', 'True').lower() == 'true'
     
     @staticmethod
     def init_app(app):

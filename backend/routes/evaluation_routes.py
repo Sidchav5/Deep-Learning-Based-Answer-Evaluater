@@ -11,7 +11,7 @@ from config import Config
 from utils.auth import token_required
 from utils.parsers import parse_questions, parse_answers
 from utils.file_processing import extract_text_from_file, allowed_file
-from services import evaluation_service, rag_service
+from services import evaluation_service, rag_service, llama_service
 from models import ml_models
 
 
@@ -48,11 +48,29 @@ def evaluate(payload):
                 'message': 'Students are not allowed to upload question/model documents. Use student submission workflow.'
             }), 403
 
-        # Check if ML models are loaded
-        if not ml_models.is_loaded:
+        requested_mode = (request.form.get('evaluationMode', '') or '').strip().lower()
+        model_mode = requested_mode or (Config.EVALUATION_MODE or 'auto').lower()
+        if model_mode == 'combined':
+            model_mode = 'auto'
+        if model_mode not in ['local', 'llama', 'auto']:
+            return jsonify({'message': 'Invalid evaluation mode. Use local, llama, or auto.'}), 400
+
+        if model_mode in ['local', 'auto'] and not ml_models.is_loaded:
             ml_models.ensure_loaded(force_reload=True)
 
-        model_mode = 'ml' if ml_models.is_loaded else 'fallback'
+        if model_mode == 'local' and not ml_models.is_loaded:
+            return jsonify({'message': 'Local ML models are not loaded for local mode.'}), 503
+
+        if model_mode == 'llama' and not llama_service.is_available():
+            return jsonify({'message': 'Llama API is not configured for llama mode.'}), 503
+
+        if model_mode == 'auto':
+            if not ml_models.is_loaded or not llama_service.is_available():
+                return jsonify({
+                    'message': 'Auto mode requires both local ML models and Llama API configured.',
+                    'localModelsLoaded': bool(ml_models.is_loaded),
+                    'llamaConfigured': bool(llama_service.is_available())
+                }), 503
         
         # Get upload mode
         upload_mode = request.form.get('uploadMode', 'file')
@@ -126,20 +144,13 @@ def evaluate(payload):
         
         # Perform batch evaluation
         try:
-            if model_mode == 'ml':
-                results = evaluation_service.evaluate_batch(
-                    questions=questions,
-                    model_answers=model_answers,
-                    student_answers=student_answers,
-                    use_rag=use_rag
-                )
-            else:
-                results = evaluation_service.evaluate_batch_fallback(
-                    questions=questions,
-                    model_answers=model_answers,
-                    student_answers=student_answers,
-                    use_rag=False
-                )
+            results = evaluation_service.evaluate_batch_mode(
+                questions=questions,
+                model_answers=model_answers,
+                student_answers=student_answers,
+                mode=model_mode,
+                use_rag=use_rag
+            )
         except Exception as e:
             print(f"Evaluation error: {e}")
             import traceback
@@ -154,6 +165,7 @@ def evaluate(payload):
                 'total_score': float(results['totalScore']),
                 'total_max_marks': float(results['totalMaxMarks']),
                 'percentage': float(results['percentage']),
+                'evaluation_mode': model_mode,
                 'rag_enabled': use_rag,
                 'timestamp': datetime.utcnow()
             }
@@ -166,7 +178,7 @@ def evaluate(payload):
         
         # Build response
         response = {
-            'message': 'Evaluation completed successfully' if model_mode == 'ml' else 'Evaluation completed using fallback mode (ML unavailable)',
+            'message': 'Evaluation completed successfully',
             'evaluationMode': model_mode,
             **results
         }
@@ -235,9 +247,13 @@ def clear_rag_store(payload):
 @eval_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
+    llama_health = llama_service.health() if llama_service.is_available() else {'status': 'unconfigured'}
     return jsonify({
         'status': 'healthy',
         'models_loaded': ml_models.is_loaded,
+        'llama_configured': llama_service.is_available(),
+        'llama_health': llama_health,
+        'default_evaluation_mode': Config.EVALUATION_MODE,
         'rag_enabled': Config.RAG_ENABLED,
         'groq_configured': bool(Config.GROQ_API_KEY)
     }), 200

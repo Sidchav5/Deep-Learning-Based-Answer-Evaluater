@@ -27,6 +27,7 @@ function WorkflowPage() {
   const [teacherSubmissions, setTeacherSubmissions] = useState([]);
   const [teacherOverrides, setTeacherOverrides] = useState({
     useRAG: true,
+    evaluationMode: 'auto',
     questionsFile: null,
     modelAnswersFile: null,
     studentAnswersFile: null,
@@ -142,7 +143,7 @@ function WorkflowPage() {
     }
 
     setUser(JSON.parse(userData));
-  }, [navigate]);
+  }, [navigate, getToken]);
 
   useEffect(() => {
     if (!user) {
@@ -238,6 +239,7 @@ function WorkflowPage() {
 
       const formData = new FormData();
       formData.append('useRAG', String(teacherOverrides.useRAG));
+      formData.append('evaluationMode', teacherOverrides.evaluationMode);
       if (teacherOverrides.questionsFile) {
         formData.append('questionsFile', teacherOverrides.questionsFile);
       }
@@ -262,7 +264,7 @@ function WorkflowPage() {
         throw new Error(data.message || 'Evaluation failed');
       }
 
-      setSuccess('Submission evaluated successfully. Release it to make it visible to student.');
+      setSuccess(`Submission evaluated successfully in ${data.evaluationMode || teacherOverrides.evaluationMode} mode. Release it to make it visible to student.`);
       if (selectedAssignmentId) {
         await loadTeacherSubmissions(selectedAssignmentId);
       }
@@ -756,9 +758,15 @@ function WorkflowPage() {
                     
             <div class="answers-grid">
               <div class="answer-box model-answer">
-                <h4>✓ Model Answer</h4>
-                <p>${q.modelAnswer}</p>
+                <h4>✓ Teacher Model Answer</h4>
+                <p>${q.teacherModelAnswer || q.modelAnswer}</p>
               </div>
+              ${q.llamaModelAnswer ? `
+              <div class="answer-box model-answer">
+                <h4>🤖 Llama Generated Reference</h4>
+                <p>${q.llamaModelAnswer}</p>
+              </div>
+              ` : ''}
               <div class="answer-box student-answer">
                 <h4>👤 Student Answer</h4>
                 <p>${q.studentAnswer}</p>
@@ -921,6 +929,17 @@ function WorkflowPage() {
               <h2>Submissions for Selected Assignment</h2>
 
               <div className="workflow-form inline-form">
+                <label>
+                  Evaluation Mode
+                  <select
+                    value={teacherOverrides.evaluationMode}
+                    onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, evaluationMode: e.target.value }))}
+                  >
+                    <option value="auto">Auto (Combined: Local + Llama)</option>
+                    <option value="local">Local (ANN + SBERT + NLI)</option>
+                    <option value="llama">Llama API Only</option>
+                  </select>
+                </label>
                 <label>
                   Override Questions (optional)
                   <input type="file" onChange={(e) => setTeacherOverrides((prev) => ({ ...prev, questionsFile: e.target.files[0] || null }))} />

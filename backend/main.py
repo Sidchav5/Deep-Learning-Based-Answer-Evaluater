@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import Config, config
 from routes import auth_bp, eval_bp, workflow_bp
 from models import ml_models
+from services import llama_service
 
 
 def create_app(config_name='development'):
@@ -57,8 +58,10 @@ def create_app(config_name='development'):
                 'authentication': True,
                 'batch_evaluation': True,
                 'rag': Config.RAG_ENABLED,
+                'evaluation_mode': Config.EVALUATION_MODE,
                 'groq_powered': bool(Config.GROQ_API_KEY),
-                'ml_models_loaded': ml_models.is_loaded
+                'ml_models_loaded': ml_models.is_loaded,
+                'llama_configured': llama_service.is_available()
             }
         })
     
@@ -87,8 +90,10 @@ def initialize_services():
     # Check configuration
     print("📋 Configuration:")
     print(f"   - Environment: {'Development' if Config.DEBUG else 'Production'}")
+    print(f"   - Evaluation Mode: {Config.EVALUATION_MODE}")
     print(f"   - RAG Enabled: {Config.RAG_ENABLED}")
     print(f"   - Groq API Key: {'✅ Configured' if Config.GROQ_API_KEY else '❌ Not configured'}")
+    print(f"   - Llama API URL: {'✅ Configured' if llama_service.is_available() else '❌ Not configured'}")
     print(f"   - Model Directory: {Config.MODEL_DIR}")
     print()
     
