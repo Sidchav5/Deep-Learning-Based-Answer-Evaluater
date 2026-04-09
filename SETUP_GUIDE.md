@@ -33,7 +33,7 @@
 
 3. **Run the Flask server:**
    ```bash
-   python app.py
+   python main.py
    ```
    Backend will run on `http://localhost:5000`
 

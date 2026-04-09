@@ -29,11 +29,11 @@ if (Test-Path ".env") {
 } else {
     Write-Host "⚠️  .env file not found. Creating from template..." -ForegroundColor Yellow
     Copy-Item ".env.example" ".env"
-    Write-Host "✅ Created .env file. Please edit it and add your GROQ_API_KEY" -ForegroundColor Green
+    Write-Host "✅ Created .env file. Please edit it and add your LLAMA_API_BASE_URL" -ForegroundColor Green
     Write-Host ""
-    Write-Host "   Get your Groq API key from: https://console.groq.com/" -ForegroundColor Cyan
+    Write-Host "   Example: https://overjealous-kimberley-nonoperative.ngrok-free.app" -ForegroundColor Cyan
     Write-Host ""
-    Read-Host "Press Enter after you've added your API key to .env"
+    Read-Host "Press Enter after you've added your Llama API URL to .env"
 }
 
 Write-Host ""
@@ -44,11 +44,11 @@ Write-Host ""
 Write-Host "🔍 Checking installation..." -ForegroundColor Cyan
 
 # Check critical packages
-$packages = @("flask", "groq", "faiss-cpu", "sentence-transformers", "tensorflow")
+$packages = @("flask", "faiss-cpu", "sentence-transformers", "tensorflow")
 $allInstalled = $true
 
 foreach ($pkg in $packages) {
-    $result = pip show $pkg 2>&1
+    pip show $pkg 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "   ✅ $pkg" -ForegroundColor Green
     } else {
@@ -72,7 +72,7 @@ Write-Host "   Setup Complete!" -ForegroundColor Green
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "To start the server, run:" -ForegroundColor Cyan
-Write-Host "   python app_new.py" -ForegroundColor Yellow
+Write-Host "   python main.py" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Or use the old version:" -ForegroundColor Cyan
 Write-Host "   python app.py" -ForegroundColor Yellow

@@ -1,12 +1,12 @@
-# 🤖 Deep Learning-Based Answer Evaluator
+# 🤖 AI Answer Evaluator
 
-An intelligent answer evaluation system powered by deep learning, featuring automatic grading, semantic similarity analysis, and AI-powered feedback generation using RAG (Retrieval-Augmented Generation).
+An intelligent answer evaluation system powered by an external Colab/Kaggle Llama pipeline for reference answer generation and scoring.
 
 ## 🌟 Features
 
-- **🎯 Automatic Answer Evaluation**: Deep learning-based grading using SBERT, NLI models, and ANN
-- **📊 Multi-Metric Scoring**: Evaluates answers on semantic similarity, relevance, completeness, and more
-- **🤖 AI-Powered Feedback**: RAG-based feedback generation using Groq API with LLaMA 3.3 70B
+- **🎯 Automatic Answer Evaluation**: Llama pipeline-based grading with semantic and keyword-aware scoring
+- **📊 Multi-Metric Scoring**: Evaluates answers on similarity, grading labels, and marks
+- **🤖 Llama Pipeline Integration**: Uses your external Colab/Kaggle FastAPI pipeline for answer generation and scoring
 - **👥 Role-Based System**: Separate interfaces for teachers and students
 - **🔐 Secure Authentication**: JWT-based authentication with MongoDB
 - **📁 Document Processing**: Support for DOCX and PDF files
@@ -16,12 +16,10 @@ An intelligent answer evaluation system powered by deep learning, featuring auto
 
 ```
 ├── backend/           # Flask API server
-│   ├── models/       # ML models (SBERT, NLI, ANN)
-│   ├── services/     # Evaluation & RAG services
+│   ├── services/     # Evaluation and external Llama client
 │   ├── routes/       # API endpoints
 │   └── utils/        # Helper functions
 ├── frontend/         # React application
-├── Model/            # Pre-trained models
 └── uploads/          # Document storage
 ```
 
@@ -32,7 +30,7 @@ An intelligent answer evaluation system powered by deep learning, featuring auto
 - Python 3.8+
 - Node.js 14+
 - MongoDB Atlas account
-- Groq API key (get from [console.groq.com](https://console.groq.com/))
+- Running Colab/Kaggle Llama FastAPI endpoint (ngrok URL)
 
 ### Backend Setup
 
@@ -54,12 +52,12 @@ An intelligent answer evaluation system powered by deep learning, featuring auto
    ```env
    MONGO_URI=your_mongodb_connection_string
    SECRET_KEY=your_secret_key
-   GROQ_API_KEY=your_groq_api_key
+   LLAMA_API_BASE_URL=https://overjealous-kimberley-nonoperative.ngrok-free.app
    ```
 
 4. **Run the server:**
    ```bash
-   python app.py
+   python main.py
    ```
    Backend runs on `http://localhost:5000`
 
@@ -84,20 +82,14 @@ An intelligent answer evaluation system powered by deep learning, featuring auto
 ## 📖 Documentation
 
 - [Setup Guide](SETUP_GUIDE.md) - Detailed setup instructions
-- [Backend API](backend/README_NEW.md) - API documentation
-- [Scoring System](backend/SCORING_EXPLANATION.md) - How scoring works
-- [Quick Reference](backend/SCORING_QUICK_REFERENCE.md) - Scoring metrics
+- [Backend API](backend/README.md) - API documentation
 - [Quickstart](backend/QUICKSTART.md) - Get started quickly
 
 ## 🎯 How It Works
 
 1. **Teacher uploads** model answers and question papers
 2. **Students submit** their answers in DOCX/PDF format
-3. **AI evaluates** answers using:
-   - Semantic similarity (SBERT embeddings)
-   - Logical consistency (NLI model)
-   - ANN-based feature scoring
-   - RAG-enhanced feedback generation
+3. **AI evaluates** answers using your external Llama scoring pipeline
 4. **Results provided** with detailed scores and AI feedback
 
 ## 🔧 Technology Stack
@@ -105,12 +97,7 @@ An intelligent answer evaluation system powered by deep learning, featuring auto
 ### Backend
 - **Framework**: Flask
 - **Database**: MongoDB Atlas
-- **ML Models**: 
-  - SBERT (sentence-transformers)
-  - NLI (cross-encoder)
-  - ANN (Keras)
-- **AI**: Groq API with LLaMA 3.3 70B
-- **Vector Store**: FAISS
+- **AI Integration**: External Llama FastAPI endpoint from Colab/Kaggle notebook
 
 ### Frontend
 - **Framework**: React
@@ -151,8 +138,7 @@ Developed by the Deep Learning team.
 
 ## 🙏 Acknowledgments
 
-- SBERT for semantic embeddings
-- Groq for AI inference
+- Llama pipeline for AI inference and grading
 - MongoDB for database services
 - All open-source contributors
 

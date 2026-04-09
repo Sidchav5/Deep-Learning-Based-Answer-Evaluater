@@ -30,11 +30,11 @@ if [ -f ".env" ]; then
 else
     echo "⚠️  .env file not found. Creating from template..."
     cp ".env.example" ".env"
-    echo "✅ Created .env file. Please edit it and add your GROQ_API_KEY"
+    echo "✅ Created .env file. Please edit it and add your LLAMA_API_BASE_URL"
     echo ""
-    echo "   Get your Groq API key from: https://console.groq.com/"
+    echo "   Example: https://overjealous-kimberley-nonoperative.ngrok-free.app"
     echo ""
-    read -p "Press Enter after you've added your API key to .env"
+    read -p "Press Enter after you've added your Llama API URL to .env"
 fi
 
 echo ""
@@ -45,7 +45,7 @@ echo ""
 echo "🔍 Checking installation..."
 
 # Check critical packages
-packages=("flask" "groq" "faiss-cpu" "sentence-transformers" "tensorflow")
+packages=("flask" "faiss-cpu" "sentence-transformers" "tensorflow")
 all_installed=true
 
 for pkg in "${packages[@]}"; do
@@ -72,7 +72,7 @@ echo "   Setup Complete!"
 echo "================================================"
 echo ""
 echo "To start the server, run:"
-echo "   python app_new.py"
+echo "   python main.py"
 echo ""
 echo "Or use the old version:"
 echo "   python app.py"
